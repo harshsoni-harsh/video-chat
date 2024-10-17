@@ -8,7 +8,11 @@ import { motion } from 'framer-motion';
 export default function Page() {
     const router = useRouter();
     addDoc(collection(db, 'calls'), {}).then((callDoc) => {
+        console.log(callDoc)
         router.push(`/video/${callDoc.id}`);
+    }).catch((err) => {
+        alert('Some error occurred');
+        console.error(err);
     });
     return (
         <div className="flex flex-col min-h-screen justify-center items-center">

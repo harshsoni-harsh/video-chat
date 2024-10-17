@@ -10,7 +10,7 @@ import {
     setDoc,
     updateDoc,
 } from 'firebase/firestore';
-import React, { ChangeEvent } from 'react';
+import React from 'react';
 import { useEffect, useRef, useState } from 'react';
 
 import {
@@ -25,7 +25,8 @@ import {
     VideoOff,
 } from 'react-feather';
 import db from '@/lib/firebase';
-import { redirect, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
+import { servers } from '@/lib/webrtc';
 
 export default function Home({
     params: { meetCode },
@@ -35,29 +36,26 @@ export default function Home({
     const [isMicOn, setMicOn] = useState(false);
     const [isVideoOn, setVideoOn] = useState(false);
     const [isDialogOpen, setDialogOpen] = useState(false);
-    const [pc, setPc] = useState<RTCPeerConnection>(null);
     const [localStream, setLocalStream] = useState<MediaStream>(null);
     const [remoteStream, setRemoteStream] = useState<MediaStream>(null);
+    const pc = useRef<RTCPeerConnection>(new RTCPeerConnection(servers));
     const webCamVideo = useRef<HTMLVideoElement>(null);
     const remoteVideo = useRef<HTMLVideoElement>(null);
     const router = useRouter();
-    // const bc = useMemo(() => new BroadcastChannel("test_channel"), []);
-    // bc.onmessage = (event) => {
-    //     console.log(event);
-    // };
 
-    // useEffect(() => {
-    //     bc && bc.postMessage("Meet code: " + meetCode);
-    //     console.log(2)
-    // }, [bc, meetCode]
+    if (pc.current) console.log(pc.current);
+    pc.current.onsignalingstatechange = () => {
+        console.log('ICE connection state change: ', pc.current);
+    };
 
     useEffect(() => {
         if (meetCode) {
             checkIfDocExists();
         }
         return () => {
-            pc?.close();
+            pc.current?.close();
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [meetCode]);
 
     async function checkIfDocExists() {
@@ -66,30 +64,30 @@ export default function Home({
             alert('Invalid Call');
             router.replace('/');
         } else {
-            createPc();
+            // Check if the call has an offer
+            const callData = callDoc.data();
+            if (!callData.offer) {
+                // No offer yet - we should create one
+                await createCall();
+            } else {
+                // Call exists with offer - join it
+                await joinCall();
+            }
         }
-    }
-    
-    function createPc() {
-        const servers = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun.l.google.com:5349' },
-                { urls: 'stun:stun1.l.google.com:3478' },
-                { urls: 'stun:stun1.l.google.com:5349' },
-            ],
-            iceCandidatePoolSize: 10,
-        };
-        if (!pc) setPc(new RTCPeerConnection(servers));
-        joinCall();
     }
 
     async function turnStreamOn() {
+        if (!pc.current) {
+            console.warn('Reinitializing peer connection due to invalid state.');
+            pc.current = new RTCPeerConnection(servers);
+        }
+
         const lstream = await navigator.mediaDevices.getUserMedia({
             video: isVideoOn,
             audio: isMicOn,
         });
         if (!localStream) {
+            console.count('lstreams')
             setLocalStream(lstream);
         } else {
             const prevAudioTracks = localStream.getAudioTracks();
@@ -117,11 +115,11 @@ export default function Home({
 
         // Push tracks from local stream to peer connection
         lstream?.getTracks().forEach((track) => {
-            pc.addTrack(track, lstream);
+            pc.current.addTrack(track, lstream);
         });
 
         // Pull tracks from remote stream, add to video stream
-        pc.ontrack = (event) => {
+        pc.current.ontrack = (event) => {
             event.streams[0].getTracks().forEach((track) => {
                 rstream.addTrack(track);
             });
@@ -164,9 +162,12 @@ export default function Home({
     async function createCall() {
         if (meetCode) {
             setDialogOpen(true);
-            return;
         }
-        createPc();
+        console.log('createCall');
+        if (pc.current.signalingState === 'closed') {
+            console.warn('Reinitializing peer connection due to closed state.');
+            pc.current = new RTCPeerConnection(servers);
+        }
 
         const callDoc = doc(collection(db, 'calls'), meetCode);
 
@@ -185,15 +186,17 @@ export default function Home({
         );
 
         // Get candidates for caller, save to db
-        pc.onicecandidate = async (event) => {
+        pc.current.onicecandidate = async (event) => {
             if (event.candidate) {
                 await addDoc(offerCandidates, event.candidate.toJSON());
+                console.log('icecandid',event.candidate.toJSON())
             }
         };
 
         // Create offer
-        const offerDescription = await pc.createOffer();
-        await pc.setLocalDescription(offerDescription);
+        const offerDescription = await pc.current.createOffer();
+        await pc.current.setLocalDescription(offerDescription);
+        console.log('Local description set:', pc.current.localDescription);
 
         const offer = {
             sdp: offerDescription.sdp,
@@ -201,15 +204,16 @@ export default function Home({
         };
 
         await setDoc(callDoc, { offer });
-
+        console.log('added offer:',{...callDoc, ...{offer}});
         // Listen for remote answer
         const unsub = onSnapshot(callDoc, (snapshot) => {
             const data = snapshot.data();
-            if (!pc.currentRemoteDescription && data?.answer) {
+            if (!pc.current.currentRemoteDescription && data?.answer) {
                 const answerDescription = new RTCSessionDescription(
                     data.answer
                 );
-                pc.setRemoteDescription(answerDescription);
+                console.log('new remote answer:',answerDescription, data.answer);
+                pc.current.setRemoteDescription(answerDescription);
             }
         });
         setDialogOpen(true);
@@ -219,12 +223,12 @@ export default function Home({
             snapshot.docChanges().forEach((change) => {
                 if (change.type === 'added') {
                     const candidate = new RTCIceCandidate(change.doc.data());
-                    pc.addIceCandidate(candidate);
+                    pc.current.addIceCandidate(candidate);
                 }
             });
         });
         return () => {
-            pc?.close();
+            pc.current?.close();
             unsubscribe();
             unsub();
         };
@@ -247,31 +251,39 @@ export default function Home({
 
     const joinCall = async () => {
         if (!meetCode) return;
-        createPc();
-        const callId = meetCode;
-        const callDoc = await getDoc(doc(collection(db, 'calls'), callId));
+        if (!pc.current) return;
+
+        if (pc.current.signalingState === 'closed') {
+            console.warn('Reinitializing peer connection due to closed state.');
+            pc.current = new RTCPeerConnection(servers);
+        }
+
+        const callDoc = await getDoc(doc(collection(db, 'calls'), meetCode));
+        const callData = callDoc.data();
+        console.log(callData);
+
         const offerCandidates = collection(
             db,
             'calls',
-            callId,
+            meetCode,
             'offerCandidates'
         );
         const answerCandidates = collection(
             db,
             'calls',
-            callId,
+            meetCode,
             'answerCandidates'
         );
-        console.log(343,pc)
 
-        pc.onicecandidate = async (event) => {
+        pc.current.onicecandidate = async (event) => {
+            console.log('new ice candidate:',event.candidate.toJSON());
             if (event.candidate) {
                 await addDoc(answerCandidates, event.candidate.toJSON());
             }
         };
 
         // Set up ontrack handler to receive remote stream
-        pc.ontrack = (event) => {
+        pc.current.ontrack = (event) => {
             event.streams[0].getTracks().forEach((track) => {
                 remoteStream.addTrack(track);
             });
@@ -280,28 +292,24 @@ export default function Home({
             }
         };
 
-        const callData = callDoc.data();
-
         const offerDescription = callData.offer;
-        await pc.setRemoteDescription(
-            new RTCSessionDescription(offerDescription)
-        );
-
-        const answerDescription = await pc.createAnswer();
-        await pc.setLocalDescription(answerDescription);
+        
+        await pc.current.setRemoteDescription(new RTCSessionDescription(offerDescription));
+        const answerDescription = await pc.current.createAnswer();
+        await pc.current.setLocalDescription(answerDescription);
 
         const answer = {
             type: answerDescription.type,
             sdp: answerDescription.sdp,
         };
 
-        await updateDoc(doc(collection(db, 'calls'), callId), { answer });
+        await updateDoc(doc(collection(db, 'calls'), meetCode), { answer });
 
         onSnapshot(query(offerCandidates), (snapshot) => {
             snapshot.docChanges().forEach((change) => {
                 if (change.type === 'added') {
                     let data = change.doc.data();
-                    pc.addIceCandidate(new RTCIceCandidate(data));
+                    pc.current.addIceCandidate(new RTCIceCandidate(data));
                 }
             });
         });
@@ -311,13 +319,13 @@ export default function Home({
         // }
 
         // Log connection state changes
-        pc.onconnectionstatechange = () => {
-            console.log("Connection state:", pc.connectionState);
+        pc.current.onconnectionstatechange = () => {
+            console.log("Connection state:", pc.current.connectionState);
         };
 
         // Log signaling state changes
-        pc.onsignalingstatechange = () => {
-            console.log("Signaling state:", pc.signalingState);
+        pc.current.onsignalingstatechange = () => {
+            console.log("Signaling state:", pc.current.signalingState);
         };
     };
 
@@ -332,7 +340,6 @@ export default function Home({
                         playsInline
                         className="border-2 border-slate-800 rounded-lg -scale-x-100"
                     />
-                    <p>{JSON.stringify(pc?.currentLocalDescription)}</p>
                 </div>
                 <div className="flex flex-col items-center gap-2">
                     <video
@@ -342,7 +349,6 @@ export default function Home({
                         playsInline
                         className="border-2 border-slate-800 rounded-lg -scale-x-100"
                     />
-                    <p>{JSON.stringify(pc?.currentRemoteDescription)}</p>
                 </div>
             </div>
         );
@@ -350,7 +356,7 @@ export default function Home({
 
     function disconnectCall() {
         remoteVideo.current = null;
-        pc.close();
+        pc.current?.close();
         router.replace('/');
     }
 
