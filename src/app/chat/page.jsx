@@ -4,9 +4,31 @@ import io from 'socket.io-client';
 import { FaPaperPlane } from 'react-icons/fa';
 
 
+
 const socket = io('http://localhost:3001', {
   transports: ['websocket'],
 });
+
+// const handleDownload = () => {
+//     // 1. Create a Blob from the ArrayBuffer
+//     const blob = new Blob([arrayBuffer], { type: fileType });
+
+//     // 2. Create a link element
+//     const link = document.createElement('a');
+
+//     // 3. Create an object URL for the Blob
+//     link.href = URL.createObjectURL(blob);
+
+//     // 4. Set the download attribute with the desired file name
+//     link.download = fileName;
+
+//     // 5. Append the link to the document and trigger a click to start download
+//     document.body.appendChild(link);
+//     link.click();
+
+//     // 6. Remove the link from the document
+//     document.body.removeChild(link);
+//   };
 
   
 
@@ -36,7 +58,7 @@ const Chat = () => {
 
     // Handle file upload
     const handleFileUpload = (event) => {
-        console.log("selectFile->",SelectedFile)
+        console.log("selectFile-> from client to server",SelectedFile)
        
         if (SelectedFile) {
             const time = getCurrentTime();
@@ -78,7 +100,7 @@ const Chat = () => {
             ]);
         });
 
-        socket.on('file-upload', (msg) => {
+        socket.on('file-upload_from_server', (msg) => {
             console.log("msg",msg)
             setMessages((prevMessages) => [
                 ...prevMessages,
@@ -150,4 +172,4 @@ const Chat = () => {
     );
 };
 
-export default Chat;
+export default Chat; 
