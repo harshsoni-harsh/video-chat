@@ -2,6 +2,8 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import fs from 'fs'
+import multer from 'multer'
 
 const app = express();
 const server = http.createServer(app);
@@ -11,7 +13,6 @@ const io = new Server(server, {cors: {
   credentials: true,
 }});
 
-// Middleware setup
 app.use(express.static('public'));
 const corsOptions = {
   origin: 'http://localhost:3000',
@@ -20,15 +21,13 @@ const corsOptions = {
   credentials: true
 };
 app.use(cors(corsOptions));
+const upload = multer({ dest: 'uploads/' }); 
 
-// Helper function to get the current time
 const getCurrentTime = () => {
   const now = new Date();
   return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); // Format: HH:MM
 };
 
-
-// Socket.io connection handler
 io.on('connection', (socket) => {
   console.log(`A user connected: ${socket.id}`);
 
@@ -49,13 +48,22 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('chat message', messageWithTime);
   });
 
-  // Handle disconnect event
+  socket.on('file-upload', (data) => {
+    console.log("file-upload",data)
+    const { fileName,time, SelectedFile } = data;
+   // const arra=arrayBufferToBase64(SelectedFile)
+   // console.log(fileName,SelectedFile)
+  //  const a=upload.single('uploaded_file')
+  //  console.log("a",a)
+    console.log("buf",SelectedFile);
+    socket.broadcast.emit('file-upload', SelectedFile);
+  });
+
   socket.on('disconnect', () => {
     console.log(`A user disconnected: ${socket.id}`);
   });
 });
 
-// Start the server
 server.listen(3001, () => {
   console.log('Server is running on port 3001');
 });

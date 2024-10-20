@@ -43,10 +43,7 @@ export default function Component() {
     };
   }, []);
 
-  const handleFileUpload = (event) => {
-    const newFiles = Array.from(event.target.files).map((file) => file.name);
-    setFiles([...files, ...newFiles]);
-  };
+
 
   const removeFile = (index) => {
     const newFiles = [...files];
@@ -71,30 +68,7 @@ export default function Component() {
     <div className="flex flex-col lg:flex-row w-full max-w-7xl mx-auto p-4 transition-all duration-300 ease-in-out">
       <div className={`bg-red rounded-3xl shadow-lg p-4 transition-all duration-300 ease-in-out ${isChatOpen ? 'lg:w-2/3' : 'w-full'}`}>
         <div className="flex flex-col md:flex-row gap-4">
-          <div className="md:w-1/3 space-y-4">
-            <div className="bg-white p-4 rounded-xl shadow">
-              <h2 className="text-2xl font-bold mb-2">File Sharing</h2>
-              <p className="text-sm text-gray-500 mb-4">Upload and manage your files</p>
-              <label className="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded-lg cursor-pointer inline-block text-center">
-                <input type="file" className="hidden" onChange={handleFileUpload} multiple />
-                <Upload className="inline-block mr-2" size={16} />
-                Upload Files
-              </label>
-            </div>
-            <div className="bg-white p-4 rounded-xl shadow">
-              <h3 className="font-semibold mb-2">Uploaded Files</h3>
-              <ul className="space-y-2">
-                {files.map((file, index) => (
-                  <li key={index} className="flex justify-between items-center">
-                    <span className="truncate">{file}</span>
-                    <button onClick={() => removeFile(index)} className="text-red-500">
-                      <X size={16} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
+         
           <div className="md:w-2/3 space-y-4">
             <div className="aspect-video bg-gray-700 rounded-xl relative">
               <div className="absolute top-2 right-2 bg-gray-200 rounded-md p-1">

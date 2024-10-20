@@ -3,46 +3,92 @@ import React, { useEffect, useState } from 'react';
 import io from 'socket.io-client';
 import { FaPaperPlane } from 'react-icons/fa';
 
-// Establish socket connection
+
 const socket = io('http://localhost:3001', {
   transports: ['websocket'],
 });
 
+  
+
 const Chat = () => {
     const [messages, setMessages] = useState([]); 
     const [newMessage, setNewMessage] = useState("");
+    const [SelectedFile,setSelectedFile] = useState(null); 
 
     const getCurrentTime = () => {
         const now = new Date();
-        return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); // Format: HH:MM
+        return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); 
     };
 
-    // Send the message to the server
     const sendMessage = () => {
         if (newMessage.trim()) {
             const time = getCurrentTime();
             const messageObj = { text: newMessage, sender: "user", time };
 
-            socket.emit('chat message', messageObj);  // Emit message to the server
+            socket.emit('chat message', messageObj);  
             setMessages((prevMessages) => [
                 ...prevMessages,
-                messageObj,  // Append the user's message with time
+                messageObj,  
             ]);
-            setNewMessage("");  // Clear input after sending
+            setNewMessage("");  
+        }
+    };
+
+    // Handle file upload
+    const handleFileUpload = (event) => {
+        console.log("selectFile->",SelectedFile)
+       
+        if (SelectedFile) {
+            const time = getCurrentTime();
+            const messageObj={fileName:SelectedFile.name,time,SelectedFile}
+            socket.emit('file-upload', messageObj);
+                  setMessages((prevMessages) => [
+                    ...prevMessages,
+                    messageObj,  
+                ]);
+           // const reader = new FileReader();
+            // console.log("reader",reader.onloadend)
+            // reader.onloadend = () => {
+            //     const fileData = reader.result.split(',')[1]; 
+            //     console.log("fileData",fileData)
+            //     const messageObj = {
+            //         text: SelectedFile.name,
+            //         sender: "user",
+            //         time,
+            //         SelectedFile,
+            //         isFile: true, // Flag to indicate this message is a file
+            //     };
+            //     socket.emit('file-upload', messageObj); // Emit file upload to the server
+            //     setMessages((prevMessages) => [
+            //         ...prevMessages,
+            //         messageObj,  // Append the user's file message with time
+            //     ]);
+            // };
+            // reader.readAsDataURL(selectedFile); // Read file as Data URL
+
+            //setFile(null); 
         }
     };
 
     useEffect(() => {
-        // Listen for incoming messages from the server
         socket.on('chat message', (msg) => {
             setMessages((prevMessages) => [
                 ...prevMessages,
-                { text: msg.text, sender: "server", time: msg.time },  // Append server messages with time
+                { text: msg.text, sender: "server", time: msg.time }, 
+            ]);
+        });
+
+        socket.on('file-upload', (msg) => {
+            console.log("msg",msg)
+            setMessages((prevMessages) => [
+                ...prevMessages,
+                { text: msg.text, sender: "server", time: msg.time, fileData: msg.fileData, isFile: true },
             ]);
         });
 
         return () => {
-            socket.off('chat message');  // Clean up the socket on component unmount
+            socket.off('chat message'); 
+            socket.off('file-upload');    
         };
     }, []);
 
@@ -58,7 +104,13 @@ const Chat = () => {
                             <div className="flex flex-col">
                                 <span className={`inline-block p-3 max-w-xs rounded-lg shadow-md text-sm 
                                     ${message.sender === "user" ? "bg-blue-500 text-white" : "bg-gray-300 text-gray-800"}`}>
-                                    {message.text}
+                                    {message.isFile ? (
+                                        <a href={`data:application/octet-stream;base64,${message.fileData}`} download={message.text}>
+                                            {message.text}
+                                        </a>
+                                    ) : (
+                                        message.text
+                                    )}
                                 </span>
                                 <span className="text-xs text-gray-500 mt-1">
                                     {message.time}
@@ -67,18 +119,29 @@ const Chat = () => {
                         </div>
                     ))}
                 </div>
-                <div className="mt-4 flex">
+                <div className="mt-4 flex items-center">
                     <input
                         type="text"
-                        className="flex-grow p-3 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 transition-all duration-200"
+                        className="flex-grow p-3 border border-gray-300 rounded-l-lg focus:outline-none focus:border-indigo-500 transition-all duration-200"
                         placeholder="Type a message..."
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
                     />
+                    <input 
+                        type="file"  
+                        onChange={(e) => setSelectedFile(e.target.files[0])}
+                        name='uploaded_file'
+                        className="border border-gray-300 rounded-lg p-2 ml-2 text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-500 file:text-white hover:file:bg-blue-600 transition duration-200"
+                    />
+                     <button 
+                        onClick={handleFileUpload}
+                        className="bg-blue-500 hover:bg-blue-600 text-white rounded-r-lg p-3 transition-all duration-200 flex items-center justify-center">
+                        <FaPaperPlane size={20} />
+                    </button>
                     <button 
                         onClick={sendMessage} 
-                        className="ml-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg p-3 transition-all duration-200 flex items-center justify-center">
+                        className="bg-blue-500 hover:bg-blue-600 text-white rounded-r-lg p-3 transition-all duration-200 flex items-center justify-center">
                         <FaPaperPlane size={20} />
                     </button>
                 </div>
