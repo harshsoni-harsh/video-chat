@@ -85,20 +85,43 @@ socket.on("file-upload", (file) => {
   //  const filePath = path.join(uploadPath, text);
 
   // // Save the file to the uploads directory
-  // fs.writeFile(filePath, file, (err) => {
+  const filePath_for_writein_file = path.join(__dirname, 'uploads')
+  
+  // fs.writeFileSync(`${filePath_for_writein_file}/${text}`, SelectedFile, (err) => {
   //   if (err) {
   //     console.error('Error saving file:', err);
   //     socket.emit('file-upload-error', 'File upload failed');
   //     return;
   //   }
 
-  //   console.log(`File saved: ${filePath}`);
-     //socket.emit('file-upload-success', 'File uploaded successfully');
+  //   console.log(`File saved: ${filePath_for_writein_file}`);
+  //    socket.emit('file-upload-success', 'File uploaded successfully');
+  // })
 
   //   // Broadcast the file upload event to other clients
-  const blobData = new Blob(SelectedFile, { type: 'image/JPG' });
-  console.log("blob",blobData)
-  socket.broadcast.emit('file-upload_from_server', file);
+  const filePath=path.join(__dirname, 'uploads',`${text}`)
+console.log("filepath->",filePath)
+
+ fs.readFile(filePath, (err, data) => {
+    if (err) {
+      console.error('Error reading file:', err);
+    }
+    console.log("dat1",data)
+    const file2 = {
+      text:text ,
+      time:time,
+      SelectedFile: data, 
+    };
+    console.log("file2",file2)
+    socket.broadcast.emit('file-upload_from_server', file2);
+
+  })
+
+  
+  // const blobData = new Blob(SelectedFile, { type: 'image/JPG' });
+//  const datatotransfer= new Uint8Array(SelectedFile)
+  // console.log("blob",blobData)
+  // console.log(file2.SelectedFile)
    //});
 });
 
@@ -117,13 +140,13 @@ server.listen(3001, () => {
 
 
 // const download=(msg)=>{
-//   const blob = new Blob([msg.SelectedFile], { type: 'application/octet-stream' });
-//   const url = window.URL.createObjectURL(blob);
-//   const link = document.createElement('a');
-//   link.href = url;
-//   link.setAttribute('download', msg.fileName);
-//   document.body.appendChild(link);
-//   link.click();
-//   link.remove();
-//   window.URL.revokeObjectURL(url);
+  // const blob = new Blob([msg.SelectedFile], { type: 'application/octet-stream' });
+  // const url = window.URL.createObjectURL(blob);
+  // const link = document.createElement('a');
+  // link.href = url;
+  // link.setAttribute('download', msg.fileName);
+  // document.body.appendChild(link);
+  // link.click();
+  // link.remove();
+  // window.URL.revokeObjectURL(url);
 // }

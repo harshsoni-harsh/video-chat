@@ -137,11 +137,11 @@ import io from 'socket.io-client';
 import { FaPaperPlane } from 'react-icons/fa';
 
 const socket = io('http://localhost:3001', { transports: ['websocket'] });
-
 const Chat = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
+
 
   const getCurrentTime = () => {
     const now = new Date();
@@ -149,24 +149,23 @@ const Chat = () => {
   };
 
   const download=(msg)=>{
-    console.log("clicked->",msg)
+    console.log("2432",messages)
+    console.log("clicked",msg)
+    const a=[255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 1, 0, 96, 0, 96, 0, 0, 255, 219, 0, 67, 0, 16, 11, 12, 14, 12, 10, 16, 14, 13, 14, 18, 17, 16, 19, 24, 41, 27, 24, 22, 22, 24, 50, 36, 38, 30, 41, 59, 52, 62, 61, 58, 52, 57, 56, 65, 73, 94, 80, 65, 69, 89, 70, 56, 57, 82, 111, 83, 89, 97, 100, 105, 106, 105, 63, 79, 115, 123, 114, 102, 122, 94, 103, 105, 101, 255, 219, 0, 67, 1, 17, 18, 18, 24, 21, 24]
     // const buffer = Buffer.from(msg);
     // console.log("buffer",buffer)
-    const nodeJSBuffer = {
-      "type": "Buffer",
-      "data": [255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 1, 0, 96, 0, 96, 0, 0, 255, 219, 0, 67, 0, 16, 11, 12, 14, 12, 10, 16, 14, 13, 14, 18, 17, 16, 19, 24, 41, 27, 24, 22, 22, 24, 50, 36, 38, 30, 41, 59, 52, 62, 61, 58, 52, 57, 56, 65, 73, 94, 80, 65, 69, 89, 70, 56, 57, 82, 111, 83, 89, 97, 100, 105, 106, 105, 63, 79, 115, 123, 114, 102, 122, 94, 103, 105, 101, 255, 219, 0, 67, 1, 17, 18, 18, 24, 21, 24,]
-   }
-   const buffer = Buffer.from(nodeJSBuffer);
-   const blob = new Blob([buffer]);                  
-   const url = window.URL.createObjectURL(blob);
-   console.log("url",url)
-   const a = document.createElement("a");
-   document.body.appendChild(a);
-   a.style = "display: none";
-   a.href = url;
-   a.download = "filename.JPG";
-   a.click();
-   window.URL.revokeObjectURL(url);
+    // console.log("a",a)
+    // const data=new Uint8Array(a)
+    //console.log("data->",data)
+    const blob = new Blob([msg.SelectedFile], { type: 'image/jpeg' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', msg.fileName);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   }
 
 // const blob = new Blob([buffer]);                      
@@ -204,6 +203,7 @@ const Chat = () => {
           time,
           SelectedFile: new Uint8Array(fileBuffer), // Keep it as a Uint8Array
         };
+      
         console.log("messageObj->", messageObj.SelectedFile); 
         socket.emit('file-upload', messageObj);
         setMessages((prevMessages) => [...prevMessages, messageObj]);
