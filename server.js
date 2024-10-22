@@ -43,6 +43,7 @@ io.on('connection', (socket) => {
 
   // Handle incoming chat messages from clients
   socket.on('chat message', (msg) => {
+    console.log("msg",msg)
     const messageWithTime = {
       text: msg.text,  // Message text
       sender: msg.sender || 'unknown',  
@@ -71,23 +72,37 @@ io.on('connection', (socket) => {
 //   });
 
 
-socket.on("file-upload", (file, callback) => {
-  console.log("file",file); // <Buffer 25 50 44 ...>
-  const { fileName,time, SelectedFile } = file;
-  // save the content to the disk, for example
-  fs.writeFile(`${fileName}`, SelectedFile, (err) => {
-    //callback({ message: err ? "failure" : "success" });
-  });
-  const apath=path.join(__dirname, `${fileName}`)
- fs.readFile(apath, (err, data) => {
-    if (err) {
-      console.error('Error reading file:', err);
-      return;
-    }
-    console.log("filetotransfer",data)
-    socket.broadcast.emit('file-upload_from_server', "hello");
-  });
+socket.on("file-upload", (file) => {
+  console.log("file",file)
+  const { text, time, SelectedFile } = file;
+  console.log(text,"time", time, SelectedFile)
+//   const uploadPath = path.join(__dirname, 'uploads');
+// console.log(uploadPath)
+  // if (!fs.existsSync(uploadPath)) {
+  //   fs.mkdirSync(uploadPath);
+  // }
+
+  //  const filePath = path.join(uploadPath, text);
+
+  // // Save the file to the uploads directory
+  // fs.writeFile(filePath, file, (err) => {
+  //   if (err) {
+  //     console.error('Error saving file:', err);
+  //     socket.emit('file-upload-error', 'File upload failed');
+  //     return;
+  //   }
+
+  //   console.log(`File saved: ${filePath}`);
+     //socket.emit('file-upload-success', 'File uploaded successfully');
+
+  //   // Broadcast the file upload event to other clients
+  const blobData = new Blob(SelectedFile, { type: 'image/JPG' });
+  console.log("blob",blobData)
+  socket.broadcast.emit('file-upload_from_server', file);
+   //});
 });
+
+
 
   socket.on('disconnect', () => {
     console.log(`A user disconnected: ${socket.id}`);
@@ -97,3 +112,18 @@ socket.on("file-upload", (file, callback) => {
 server.listen(3001, () => {
   console.log('Server is running on port 3001');
 });
+
+
+
+
+// const download=(msg)=>{
+//   const blob = new Blob([msg.SelectedFile], { type: 'application/octet-stream' });
+//   const url = window.URL.createObjectURL(blob);
+//   const link = document.createElement('a');
+//   link.href = url;
+//   link.setAttribute('download', msg.fileName);
+//   document.body.appendChild(link);
+//   link.click();
+//   link.remove();
+//   window.URL.revokeObjectURL(url);
+// }
