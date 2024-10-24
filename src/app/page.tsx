@@ -33,10 +33,6 @@ export default function Page() {
                         </button>
                     </div>
                 </div>
-                <div className="flex flex-col gap-3 border-2 rounded-xl p-2 border-gray-400">
-                    <p className="text-xl font-bold">Share files</p>
-                    <input className="rounded-lg text-black px-2" />
-                </div>
             </div>
         </div>
     );

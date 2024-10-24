@@ -259,7 +259,7 @@ export default function VideoChat({
                 if (change.type === 'added') {
                     const data = change.doc.data();
                     if (data.fromUserId === peerId && !pc.currentRemoteDescription) {
-                        await pc.setRemoteDescription(new RTCSessionDescription(data));
+                        await pc.setRemoteDescription(new RTCSessionDescription(data as { type: RTCSdpType, sdp: string }));
                     }
                 }
             });
