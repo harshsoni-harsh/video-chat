@@ -1,19 +1,29 @@
 'use client';
 
 import db from '@/lib/firebase';
-import { addDoc, collection } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import { useEffect } from 'react';
 
 export default function Page() {
     const router = useRouter();
-    addDoc(collection(db, 'calls'), {}).then((callDoc) => {
-        console.log(callDoc)
-        router.push(`/video/${callDoc.id}`);
-    }).catch((err) => {
-        alert('Some error occurred');
-        console.error(err);
-    });
+    useEffect(() => {
+        async function createCall() {
+            try {
+                const callDoc = await addDoc(collection(db, 'calls'), {
+                    createdAt: serverTimestamp(),
+                    participants: []
+                });
+                router.push(`/video/${callDoc.id}`);
+            } catch (err) {
+                console.error('Failed to create meeting:', err);
+                alert('Failed to create meeting. Please try again.');
+            }
+        }
+        if (router)
+            createCall();
+    }, [router]);
     return (
         <div className="flex flex-col min-h-screen justify-center items-center">
             <motion.div

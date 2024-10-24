@@ -2,17 +2,16 @@
 
 import {
     addDoc,
-    collection,
+    collection, deleteDoc,
     doc,
     getDoc,
     onSnapshot,
     query,
+    serverTimestamp,
     setDoc,
     updateDoc,
 } from 'firebase/firestore';
-import React from 'react';
-import { useEffect, useRef, useState } from 'react';
-
+import React, { useEffect, useRef, useState } from 'react';
 import {
     Airplay,
     Mic,
@@ -23,12 +22,23 @@ import {
     Users,
     Video,
     VideoOff,
-} from 'react-feather';
+} from 'lucide-react';
 import db from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
-import { servers } from '@/lib/webrtc';
 
-export default function Home({
+// WebRTC configuration
+const servers = {
+    iceServers: [
+        {
+            urls: [
+                'stun:stun1.l.google.com:19302',
+                'stun:stun2.l.google.com:19302',
+            ],
+        },
+    ],
+};
+
+export default function VideoChat({
     params: { meetCode },
 }: {
     params: { meetCode: string };
@@ -36,333 +46,264 @@ export default function Home({
     const [isMicOn, setMicOn] = useState(false);
     const [isVideoOn, setVideoOn] = useState(false);
     const [isDialogOpen, setDialogOpen] = useState(false);
-    const [localStream, setLocalStream] = useState<MediaStream>(null);
-    const [remoteStream, setRemoteStream] = useState<MediaStream>(null);
-    const pc = useRef<RTCPeerConnection>(new RTCPeerConnection(servers));
-    const webCamVideo = useRef<HTMLVideoElement>(null);
-    const remoteVideo = useRef<HTMLVideoElement>(null);
+    const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+    const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+    const [peerConnections, setPeerConnections] = useState<Map<string, RTCPeerConnection>>(new Map());
+    const [userId] = useState<string>(`user-${Math.random().toString(36).substring(2, 9)}`);
+    const debouncedTimeoutRef = useRef(null); // For setupLocalMedia function
+
+    const localVideoRef = useRef<HTMLVideoElement>(null);
     const router = useRouter();
 
-    if (pc.current) console.log(pc.current);
-    pc.current.onsignalingstatechange = () => {
-        console.log('ICE connection state change: ', pc.current);
-    };
-
     useEffect(() => {
         if (meetCode) {
-            checkIfDocExists();
+            initializeMeet();
         }
         return () => {
-            pc.current?.close();
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+            // Cleanup
+            localStream?.getTracks().forEach(track => track.stop());
+            peerConnections.forEach(pc => pc.close());
+        };
     }, [meetCode]);
 
-    async function checkIfDocExists() {
-        const callDoc = await getDoc(doc(collection(db, "calls"), meetCode));
-        if (!callDoc.exists()) {
-            alert('Invalid Call');
+    async function initializeMeet() {
+        const meetDoc = await getDoc(doc(collection(db, 'calls'), meetCode));
+
+        if (!meetDoc.exists()) {
+            alert('Invalid meeting code');
             router.replace('/');
-        } else {
-            // Check if the call has an offer
-            const callData = callDoc.data();
-            if (!callData.offer) {
-                // No offer yet - we should create one
-                await createCall();
-            } else {
-                // Call exists with offer - join it
-                await joinCall();
-            }
-        }
-    }
-
-    async function turnStreamOn() {
-        if (!pc.current) {
-            console.warn('Reinitializing peer connection due to invalid state.');
-            pc.current = new RTCPeerConnection(servers);
+            return;
         }
 
-        const lstream = await navigator.mediaDevices.getUserMedia({
-            video: isVideoOn,
-            audio: isMicOn,
-        });
-        if (!localStream) {
-            console.count('lstreams')
-            setLocalStream(lstream);
-        } else {
-            const prevAudioTracks = localStream.getAudioTracks();
-            const prevVideoTracks = localStream.getVideoTracks();
-            if (!isMicOn) {
-                prevAudioTracks.forEach((track) =>
-                    localStream.removeTrack(track)
-                );
-            } else if (!prevAudioTracks.length) {
-                const streamTracks = lstream.getAudioTracks();
-                streamTracks.forEach((track) => localStream.addTrack(track));
-            }
-            if (!isVideoOn) {
-                prevVideoTracks.forEach((track) =>
-                    localStream.removeTrack(track)
-                );
-            } else if (!prevVideoTracks.length) {
-                const streamTracks = lstream.getVideoTracks();
-                streamTracks.forEach((track) => localStream.addTrack(track));
-            }
-        }
-
-        const rstream = new MediaStream();
-        setRemoteStream(rstream);
-
-        // Push tracks from local stream to peer connection
-        lstream?.getTracks().forEach((track) => {
-            pc.current.addTrack(track, lstream);
+        // Add participant to the meeting
+        await setDoc(doc(collection(db, 'calls', meetCode, 'participants'), userId), {
+            userId,
+            joinedAt: serverTimestamp(),
         });
 
-        // Pull tracks from remote stream, add to video stream
-        pc.current.ontrack = (event) => {
-            event.streams[0].getTracks().forEach((track) => {
-                rstream.addTrack(track);
+        // Listen for new participants
+        onSnapshot(collection(db, 'calls', meetCode, 'participants'), (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
+                if (change.type === 'added' && change.doc.id !== userId) {
+                    const peerId = change.doc.id;
+                    if (!peerConnections.has(peerId)) {
+                        await createPeerConnection(peerId);
+                    }
+                }
             });
-        };
+        });
 
-        try {
-            if (lstream.active) {
-                webCamVideo.current.srcObject = lstream;
-                await webCamVideo.current.play();
-            }
-        } catch (e) {
-            console.error('Error playing webcam video', e);
-        }
-        try {
-            if (rstream.active) {
-                remoteVideo.current.srcObject = rstream;
-                await remoteVideo.current.play();
-            }
-        } catch (e) {
-            console.error('Error playing remote stream', e);
+        // Listen for offers
+        onSnapshot(collection(db, 'calls', meetCode, 'offers'), (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
+                if (change.type === 'added') {
+                    const data = change.doc.data();
+                    const peerId = data.fromUserId;
+                    console.log('from offers', data);
+                    
+                    if (peerId !== userId) {
+                        await handleOffer(peerId, data);
+                    }
+                }
+            });
+        });
+
+        // Initialize local media
+        if (isVideoOn || isMicOn) {
+            await setupLocalMedia();
         }
     }
 
     useEffect(() => {
-        const audioTracks = localStream?.getAudioTracks();
-        const videoTracks = localStream?.getVideoTracks();
-        if (!isVideoOn) {
-            videoTracks?.forEach((track) => track.stop());
-            webCamVideo.current.srcObject = null;
+        // Clear any previous timeout to debounce
+        if (debouncedTimeoutRef.current) {
+            localStream?.getAudioTracks()?.forEach(track => track.stop());
+            localStream?.getVideoTracks()?.forEach(track => track.stop());
+            clearTimeout(debouncedTimeoutRef.current);
         }
-        if (!isMicOn) {
-            audioTracks?.forEach((track) => track.stop());
-        }
-        if (isMicOn || isVideoOn) {
-            turnStreamOn();
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isVideoOn, isMicOn, localStream]);
+        debouncedTimeoutRef.current = setTimeout(() => {
+            if (!isVideoOn) {
+                localVideoRef.current.srcObject = null;
+                localStream?.getVideoTracks()?.forEach(track => track.stop());
+            }
+            if (!isMicOn) {
+                localStream?.getAudioTracks()?.forEach(track => track.stop());
+            }
+            if (isMicOn || isVideoOn) {
+                setupLocalMedia();
+            }
+        }, 300); // Debouncing of 300 ms for effectiveness
 
-    async function createCall() {
-        if (meetCode) {
-            setDialogOpen(true);
-        }
-        console.log('createCall');
-        if (pc.current.signalingState === 'closed') {
-            console.warn('Reinitializing peer connection due to closed state.');
-            pc.current = new RTCPeerConnection(servers);
-        }
-
-        const callDoc = doc(collection(db, 'calls'), meetCode);
-
-        // Reference Firestore collections for signaling
-        const offerCandidates = collection(
-            db,
-            'calls',
-            meetCode,
-            'offerCandidates'
-        );
-        const answerCandidates = collection(
-            db,
-            'calls',
-            meetCode,
-            'answerCandidates'
-        );
-
-        // Get candidates for caller, save to db
-        pc.current.onicecandidate = async (event) => {
-            if (event.candidate) {
-                await addDoc(offerCandidates, event.candidate.toJSON());
-                console.log('icecandid',event.candidate.toJSON())
+        return () => {
+            if (debouncedTimeoutRef.current) {
+                clearTimeout(debouncedTimeoutRef.current);
             }
         };
+    }, [isMicOn, isVideoOn]);
 
-        // Create offer
-        const offerDescription = await pc.current.createOffer();
-        await pc.current.setLocalDescription(offerDescription);
-        console.log('Local description set:', pc.current.localDescription);
+    async function setupLocalMedia() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: isVideoOn,
+                audio: isMicOn,
+            });
+            setLocalStream(stream);
 
-        const offer = {
-            sdp: offerDescription.sdp,
-            type: offerDescription.type,
-        };
-
-        await setDoc(callDoc, { offer });
-        console.log('added offer:',{...callDoc, ...{offer}});
-        // Listen for remote answer
-        const unsub = onSnapshot(callDoc, (snapshot) => {
-            const data = snapshot.data();
-            if (!pc.current.currentRemoteDescription && data?.answer) {
-                const answerDescription = new RTCSessionDescription(
-                    data.answer
-                );
-                console.log('new remote answer:',answerDescription, data.answer);
-                pc.current.setRemoteDescription(answerDescription);
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = stream;
             }
+
+            // Add tracks to all existing peer connections
+            peerConnections.forEach(pc => {
+                stream.getTracks().forEach(track => {
+                    pc.addTrack(track, stream);
+                });
+            });
+        } catch (err) {
+            console.error('Error accessing media devices:', err);
+        }
+    }
+
+    async function handleOffer(peerId: string, offerData: any) {
+        const pc = new RTCPeerConnection(servers);
+
+        // Add local tracks
+        localStream?.getTracks().forEach(track => {
+            pc.addTrack(track, localStream);
         });
-        setDialogOpen(true);
 
-        // When answered, add candidate to peer connection
-        const unsubscribe = onSnapshot(query(answerCandidates), (snapshot) => {
-            snapshot.docChanges().forEach((change) => {
+        // Handle incoming tracks
+        pc.ontrack = (event) => {
+            const stream = event.streams[0];
+            setRemoteStreams(prev => new Map(prev.set(peerId, stream)));
+        };
+
+        // Handle ICE candidates
+        pc.onicecandidate = async (event) => {
+            if (event.candidate) {
+                await addDoc(collection(db, 'calls', meetCode, 'candidates', peerId),
+                    event.candidate.toJSON()
+                );
+            }
+        };
+
+        // Set remote description (offer)
+        await pc.setRemoteDescription(new RTCSessionDescription(offerData));
+
+        // Create and set local description (answer)
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        // Send answer
+        await setDoc(doc(db, 'calls', meetCode, 'answers', peerId), {
+            type: answer.type,
+            sdp: answer.sdp,
+            fromUserId: userId
+        });
+
+        // Store peer connection
+        setPeerConnections(prev => new Map(prev.set(peerId, pc)));
+
+        // Listen for ICE candidates from the offering peer
+        onSnapshot(collection(db, 'calls', meetCode, 'candidates', peerId), (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
                 if (change.type === 'added') {
                     const candidate = new RTCIceCandidate(change.doc.data());
-                    pc.current.addIceCandidate(candidate);
+                    await pc.addIceCandidate(candidate);
                 }
             });
         });
-        return () => {
-            pc.current?.close();
-            unsubscribe();
-            unsub();
+    }
+
+    async function createPeerConnection(peerId: string) {
+        const pc = new RTCPeerConnection(servers);
+
+        // Add local tracks to peer connection
+        localStream?.getTracks().forEach(track => {
+            pc.addTrack(track, localStream);
+        });
+
+        // Handle incoming tracks
+        pc.ontrack = (event) => {
+            const stream = event.streams[0];
+            setRemoteStreams(prev => new Map(prev.set(peerId, stream)));
         };
-    }
-    function Dialog() {
-        if (!isDialogOpen) return null;
-        return (
-            <div className="select-text p-4 bg-gray-200/90 text-gray-800 border-2 rounded-lg border-gray-400 fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                <p>Meet code</p>
-                <p>{meetCode}</p>
-                <button
-                    onClick={() => setDialogOpen(false)}
-                    className="mt-4 bg-red-500 rounded-lg px-2 py-1 text-gray-200"
-                >
-                    Close
-                </button>
-            </div>
-        );
-    }
 
-    const joinCall = async () => {
-        if (!meetCode) return;
-        if (!pc.current) return;
-
-        if (pc.current.signalingState === 'closed') {
-            console.warn('Reinitializing peer connection due to closed state.');
-            pc.current = new RTCPeerConnection(servers);
-        }
-
-        const callDoc = await getDoc(doc(collection(db, 'calls'), meetCode));
-        const callData = callDoc.data();
-        console.log(callData);
-
-        const offerCandidates = collection(
-            db,
-            'calls',
-            meetCode,
-            'offerCandidates'
-        );
-        const answerCandidates = collection(
-            db,
-            'calls',
-            meetCode,
-            'answerCandidates'
-        );
-
-        pc.current.onicecandidate = async (event) => {
-            console.log('new ice candidate:',event.candidate.toJSON());
+        // Handle ICE candidates
+        pc.onicecandidate = async (event) => {
             if (event.candidate) {
-                await addDoc(answerCandidates, event.candidate.toJSON());
+                await addDoc(collection(db, 'calls', meetCode, 'candidates', peerId),
+                    event.candidate.toJSON()
+                );
             }
         };
 
-        // Set up ontrack handler to receive remote stream
-        pc.current.ontrack = (event) => {
-            event.streams[0].getTracks().forEach((track) => {
-                remoteStream.addTrack(track);
-            });
-            if (remoteVideo.current) {
-                remoteVideo.current.srcObject = remoteStream;
-            }
-        };
+        // Store peer connection
+        setPeerConnections(prev => new Map(prev.set(peerId, pc)));
 
-        const offerDescription = callData.offer;
-        
-        await pc.current.setRemoteDescription(new RTCSessionDescription(offerDescription));
-        const answerDescription = await pc.current.createAnswer();
-        await pc.current.setLocalDescription(answerDescription);
+        // Create and send offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
 
-        const answer = {
-            type: answerDescription.type,
-            sdp: answerDescription.sdp,
-        };
+        await setDoc(doc(db, 'calls', meetCode, 'offers', userId), {
+            sdp: offer.sdp,
+            type: offer.type,
+            fromUserId: userId,
+        });
 
-        await updateDoc(doc(collection(db, 'calls'), meetCode), { answer });
+        console.log(offer)
 
-        onSnapshot(query(offerCandidates), (snapshot) => {
-            snapshot.docChanges().forEach((change) => {
+        // Listen for answer
+        onSnapshot(collection(db, 'calls', meetCode, 'answers'), (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
                 if (change.type === 'added') {
-                    let data = change.doc.data();
-                    pc.current.addIceCandidate(new RTCIceCandidate(data));
+                    const data = change.doc.data();
+                    if (data.fromUserId === peerId && !pc.currentRemoteDescription) {
+                        await pc.setRemoteDescription(new RTCSessionDescription(data));
+                    }
                 }
             });
         });
-        // if (remoteStream?.active) {
-        //     remoteVideo.current.srcObject = remoteStream;
-        //     remoteVideo.current.play();
-        // }
 
-        // Log connection state changes
-        pc.current.onconnectionstatechange = () => {
-            console.log("Connection state:", pc.current.connectionState);
-        };
-
-        // Log signaling state changes
-        pc.current.onsignalingstatechange = () => {
-            console.log("Signaling state:", pc.current.signalingState);
-        };
-    };
-
-    function RenderVideos() {
-        return (
-            <div className="grid grid-cols-1 gap-4 max-md:mb-40 md:py-20 size-full place-items-center content-center">
-                <div className="flex flex-col items-center gap-2">
-                    <video
-                        autoPlay
-                        ref={webCamVideo}
-                        controls={false}
-                        playsInline
-                        className="border-2 border-slate-800 rounded-lg -scale-x-100"
-                    />
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                    <video
-                        autoPlay
-                        ref={remoteVideo}
-                        controls={false}
-                        playsInline
-                        className="border-2 border-slate-800 rounded-lg -scale-x-100"
-                    />
-                </div>
-            </div>
-        );
+        return pc;
     }
 
     function disconnectCall() {
-        remoteVideo.current = null;
-        pc.current?.close();
+        localStream?.getTracks().forEach(track => track.stop());
+        peerConnections.forEach(pc => pc.close());
         router.replace('/');
     }
 
     return (
-        <div className="flex h-screen flex-col justify-center items-center p-2 select-none">
-            {RenderVideos()}
+        <div className="flex flex-col h-screen items-center w-screen">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 w-full">
+                {/* Local video */}
+                <div className="relative">
+                    <video
+                        ref={localVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full rounded-lg border-2 border-slate-800 -scale-x-100"
+                    />
+                    <div className="absolute bottom-4 left-4">You</div>
+                </div>
+
+                {/* Remote videos */}
+                {Array.from(remoteStreams).map(([peerId, stream]) => (
+                    <div key={peerId} className="relative">
+                        <video
+                            autoPlay
+                            playsInline
+                            className="w-full rounded-lg border-2 border-slate-800 -scale-x-100"
+                            ref={el => {
+                                if (el) el.srcObject = stream;
+                            }}
+                        />
+                        <div className="absolute bottom-4 left-4">Peer {peerId}</div>
+                    </div>
+                ))}
+            </div>
             <div className="fixed bottom-3 flex flex-wrap justify-center gap-2 rounded-xl p-3 bg-slate-800">
                 {isMicOn ? (
                     <Mic
@@ -413,7 +354,12 @@ export default function Home({
                     <PhoneOff className="size-6" />
                 </button>
             </div>
-            <Dialog />
+            {isDialogOpen && (
+                <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white p-4 rounded-lg">
+                    <p>Meeting Code: {meetCode}</p>
+                    <button onClick={() => setDialogOpen(false)}>Close</button>
+                </div>
+            )}
         </div>
     );
 }
