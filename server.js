@@ -87,16 +87,16 @@ socket.on("file-upload", (file) => {
   // // Save the file to the uploads directory
   const filePath_for_writein_file = path.join(__dirname, 'uploads')
   
-  // fs.writeFileSync(`${filePath_for_writein_file}/${text}`, SelectedFile, (err) => {
-  //   if (err) {
-  //     console.error('Error saving file:', err);
-  //     socket.emit('file-upload-error', 'File upload failed');
-  //     return;
-  //   }
+  fs.writeFileSync(`${filePath_for_writein_file}/${text}`, SelectedFile, (err) => {
+    if (err) {
+      console.error('Error saving file:', err);
+      socket.emit('file-upload-error', 'File upload failed');
+      return;
+    }
 
-  //   console.log(`File saved: ${filePath_for_writein_file}`);
-  //    socket.emit('file-upload-success', 'File uploaded successfully');
-  // })
+    console.log(`File saved: ${filePath_for_writein_file}`);
+     socket.emit('file-upload-success', 'File uploaded successfully');
+  })
 
   //   // Broadcast the file upload event to other clients
   const filePath=path.join(__dirname, 'uploads',`${text}`)
@@ -113,6 +113,7 @@ console.log("filepath->",filePath)
       SelectedFile: data, 
     };
     console.log("file2",file2)
+    //fs.unlinkSync(filePath_for_writein_file);
     socket.broadcast.emit('file-upload_from_server', file2);
 
   })

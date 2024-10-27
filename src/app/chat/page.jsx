@@ -134,13 +134,29 @@
 'use client'
 import React, { useEffect, useState } from 'react';
 import io from 'socket.io-client';
+import CryptoJS from 'crypto-js';
+const secretKey = 'your-secret-key';
 import { FaPaperPlane } from 'react-icons/fa';
 
 const socket = io('http://localhost:3001', { transports: ['websocket'] });
+
 const Chat = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
+  const [encryptedText, setEncryptedText] = useState('');
+  const [decryptedText, setDecryptedText] = useState('');
+
+  const encryptText = (text) => {
+    const encrypted = CryptoJS.AES.encrypt(text, secretKey).toString();
+    setEncryptedText(encrypted);
+  };
+  const decryptText = (text) => {
+    const bytes = CryptoJS.AES.decrypt(text, secretKey);
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+    setDecryptedText(decrypted);
+  };
+
 
 
   const getCurrentTime = () => {
@@ -148,37 +164,18 @@ const Chat = () => {
     return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  const download=(msg)=>{
-    console.log("2432",messages)
-    console.log("clicked",msg)
-    const a=[255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 1, 1, 0, 96, 0, 96, 0, 0, 255, 219, 0, 67, 0, 16, 11, 12, 14, 12, 10, 16, 14, 13, 14, 18, 17, 16, 19, 24, 41, 27, 24, 22, 22, 24, 50, 36, 38, 30, 41, 59, 52, 62, 61, 58, 52, 57, 56, 65, 73, 94, 80, 65, 69, 89, 70, 56, 57, 82, 111, 83, 89, 97, 100, 105, 106, 105, 63, 79, 115, 123, 114, 102, 122, 94, 103, 105, 101, 255, 219, 0, 67, 1, 17, 18, 18, 24, 21, 24]
-    // const buffer = Buffer.from(msg);
-    // console.log("buffer",buffer)
-    // console.log("a",a)
-    // const data=new Uint8Array(a)
-    //console.log("data->",data)
-    const blob = new Blob([msg.SelectedFile], { type: 'image/jpeg' });
+  const download = (msg) => {
+    console.log("msg->",msg)
+    const blob = new Blob([msg.SelectedFile], { type: 'application/octet-stream' });
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', msg.fileName);
+    link.setAttribute('download', msg.text); // Download with the filename sent
     document.body.appendChild(link);
     link.click();
     link.remove();
     window.URL.revokeObjectURL(url);
-  }
-
-// const blob = new Blob([buffer]);                      
-// const url = window.URL.createObjectURL(blob);
-// const a = document.createElement("a");
-// document.body.appendChild(a);
-// a.style = "display: none";
-// a.href = url;
-// a.download = "filename.pdf";
-// a.click();
-// window.URL.revokeObjectURL(url);
-
-
+  };
 
   const sendMessage = () => {
     if (newMessage.trim()) {
@@ -192,21 +189,20 @@ const Chat = () => {
   };
 
   const handleFileUpload = async () => {
-    console.log("selecteFile",selectedFile)
     if (selectedFile) {
       const time = getCurrentTime();
       const reader = new FileReader();
       reader.onloadend = () => {
-        const fileBuffer = reader.result; // This is an ArrayBuffer
+        const fileBuffer = reader.result;
         const messageObj = {
           text: selectedFile.name,
           time,
-          SelectedFile: new Uint8Array(fileBuffer), // Keep it as a Uint8Array
+          SelectedFile: new Uint8Array(fileBuffer), // Keep as Uint8Array
         };
-      
-        console.log("messageObj->", messageObj.SelectedFile); 
+
         socket.emit('file-upload', messageObj);
         setMessages((prevMessages) => [...prevMessages, messageObj]);
+        setSelectedFile(null); // Clear the selected file
       };
       reader.readAsArrayBuffer(selectedFile);
     }
@@ -215,17 +211,13 @@ const Chat = () => {
   useEffect(() => {
     socket.on('chat message', (msg) => {
       setMessages((prevMessages) => [...prevMessages, { text: msg.text, sender: 'server', time: msg.time }]);
-      console.log("newmessages->",newMessage)
     });
 
     socket.on('file-upload_from_server', (msg) => {
-      console.log('msg',msg)
-      download(msg)
       setMessages((prevMessages) => [
         ...prevMessages,
-        { text: msg.text, sender: 'server', time: msg.time,filedata:msg.SelectedFile, isFile: true },
+        { text: msg.text, sender: 'server', time: msg.time, SelectedFile: msg.SelectedFile, isFile: true },
       ]);
-      console.log("file-upload message",messages,newMessage)
     });
 
     return () => {
@@ -247,7 +239,7 @@ const Chat = () => {
                 <span className={`inline-block p-3 max-w-xs rounded-lg shadow-md text-sm 
                   ${message.sender === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-300 text-gray-800'}`}>
                   {message.isFile ? (
-                    <button >
+                    <button onClick={() => download(message)}>
                       {message.text}
                     </button>
                   ) : (
