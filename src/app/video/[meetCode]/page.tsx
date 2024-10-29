@@ -11,7 +11,7 @@ import {
     setDoc,
     updateDoc,
 } from 'firebase/firestore';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Airplay,
     Mic,
@@ -55,12 +55,42 @@ export default function VideoChat({
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const router = useRouter();
 
+    // const cleanupInactiveStreams = useCallback(() => {
+    //     setRemoteStreams(prev => {
+    //         const newStreams = new Map();
+    //         prev.forEach((stream, peerId) => {
+    //             if (stream.active) {
+    //                 newStreams.set(peerId, stream);
+    //             }
+    //         });
+    //         console.log(userId, newStreams);
+    //         return newStreams;
+    //     });
+    // }, []);
+
+    // // Add cleanup effect
+    // useEffect(() => {
+    //     const cleanup = setInterval(cleanupInactiveStreams, 5000);
+    //     return () => clearInterval(cleanup);
+    // }, [cleanupInactiveStreams]);
+
     useEffect(() => {
+        console.log(userId, peerConnections);
+    }, [peerConnections])
+
+    useEffect(() => {
+        console.clear();
+        try {
+            navigator.clipboard.writeText(meetCode);
+        } catch (err) {
+            console.log(err)
+        }
         if (meetCode) {
             initializeMeet();
         }
         return () => {
             // Cleanup
+            console.clear();
             localStream?.getTracks().forEach(track => track.stop());
             peerConnections.forEach(pc => pc.close());
         };
@@ -76,7 +106,7 @@ export default function VideoChat({
         }
 
         // Add participant to the meeting
-        await setDoc(doc(collection(db, 'calls', meetCode, 'participants'), userId), {
+        await setDoc(doc(db, 'calls', meetCode, 'participants', userId), {
             userId,
             joinedAt: serverTimestamp(),
         });
@@ -84,8 +114,8 @@ export default function VideoChat({
         // Listen for new participants
         onSnapshot(collection(db, 'calls', meetCode, 'participants'), (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
-                if (change.type === 'added' && change.doc.id !== userId) {
-                    const peerId = change.doc.id;
+                const peerId = change.doc.id;
+                if (change.type === 'added' && peerId !== userId) {
                     if (!peerConnections.has(peerId)) {
                         await createPeerConnection(peerId);
                     }
@@ -98,8 +128,7 @@ export default function VideoChat({
             snapshot.docChanges().forEach(async (change) => {
                 if (change.type === 'added') {
                     const data = change.doc.data();
-                    const peerId = data.fromUserId;
-                    console.log('from offers', data);
+                    const peerId = change.doc.id;
                     
                     if (peerId !== userId) {
                         await handleOffer(peerId, data);
@@ -163,9 +192,12 @@ export default function VideoChat({
             console.error('Error accessing media devices:', err);
         }
     }
-
+    
     async function handleOffer(peerId: string, offerData: any) {
         const pc = new RTCPeerConnection(servers);
+
+        // Store peer connection
+        setPeerConnections(prev => new Map(prev.set(peerId, pc)));
 
         // Add local tracks
         localStream?.getTracks().forEach(track => {
@@ -181,10 +213,19 @@ export default function VideoChat({
         // Handle ICE candidates
         pc.onicecandidate = async (event) => {
             if (event.candidate) {
-                await addDoc(collection(db, 'calls', meetCode, 'candidates', peerId),
+                await setDoc(doc(db, 'calls', meetCode, 'candidates', peerId),
                     event.candidate.toJSON()
                 );
             }
+        };
+
+        // Add connection state change logging
+        pc.onconnectionstatechange = () => {
+            console.log(`Connection state for peer ${peerId}:`, pc.connectionState);
+        };
+
+        pc.onsignalingstatechange = () => {
+            console.log(`Signaling state for peer ${peerId}:`, pc.signalingState);
         };
 
         // Set remote description (offer)
@@ -198,14 +239,10 @@ export default function VideoChat({
         await setDoc(doc(db, 'calls', meetCode, 'answers', peerId), {
             type: answer.type,
             sdp: answer.sdp,
-            fromUserId: userId
         });
 
-        // Store peer connection
-        setPeerConnections(prev => new Map(prev.set(peerId, pc)));
-
         // Listen for ICE candidates from the offering peer
-        onSnapshot(collection(db, 'calls', meetCode, 'candidates', peerId), (snapshot) => {
+        onSnapshot(collection(db, 'calls', meetCode, 'candidates'), (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
                 if (change.type === 'added') {
                     const candidate = new RTCIceCandidate(change.doc.data());
@@ -232,7 +269,7 @@ export default function VideoChat({
         // Handle ICE candidates
         pc.onicecandidate = async (event) => {
             if (event.candidate) {
-                await addDoc(collection(db, 'calls', meetCode, 'candidates', peerId),
+                await setDoc(doc(db, 'calls', meetCode, 'candidates', peerId),
                     event.candidate.toJSON()
                 );
             }
@@ -248,18 +285,16 @@ export default function VideoChat({
         await setDoc(doc(db, 'calls', meetCode, 'offers', userId), {
             sdp: offer.sdp,
             type: offer.type,
-            fromUserId: userId,
         });
-
-        console.log(offer)
 
         // Listen for answer
         onSnapshot(collection(db, 'calls', meetCode, 'answers'), (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
                 if (change.type === 'added') {
                     const data = change.doc.data();
-                    if (data.fromUserId === peerId && !pc.currentRemoteDescription) {
-                        await pc.setRemoteDescription(new RTCSessionDescription(data as { type: RTCSdpType, sdp: string }));
+                    const fromUserId = change.doc.id;
+                    if (fromUserId === peerId && !pc.currentRemoteDescription) {
+                        await pc.setRemoteDescription(new RTCSessionDescription(data as RTCSessionDescriptionInit));
                     }
                 }
             });
@@ -276,7 +311,7 @@ export default function VideoChat({
 
     return (
         <div className="flex flex-col h-screen items-center w-screen">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 w-full">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 w-full">
                 {/* Local video */}
                 <div className="relative">
                     <video
@@ -284,7 +319,7 @@ export default function VideoChat({
                         autoPlay
                         playsInline
                         muted
-                        className="w-full rounded-lg border-2 border-slate-800 -scale-x-100"
+                        className="w-full rounded-lg border-2 border-slate-800 -scale-x-100 bg-gray-800"
                     />
                     <div className="absolute bottom-4 left-4">You</div>
                 </div>
