@@ -36,6 +36,8 @@ const servers = {
             ],
         },
     ],
+    iceCandidatePoolSize: 10,
+    sdpSemantics: 'plan-b',
 };
 
 export default function VideoChat({
@@ -43,8 +45,8 @@ export default function VideoChat({
 }: {
     params: { meetCode: string };
 }) {
-    const [isMicOn, setMicOn] = useState(false);
-    const [isVideoOn, setVideoOn] = useState(false);
+    const [isMicOn, setMicOn] = useState(true);
+    const [isVideoOn, setVideoOn] = useState(true);
     const [isDialogOpen, setDialogOpen] = useState(false);
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
@@ -76,21 +78,37 @@ export default function VideoChat({
 
     useEffect(() => {
         console.log(userId, peerConnections);
+        peerConnections.forEach((pc, peerId) => {
+            console.log(peerId);
+            pc.onconnectionstatechange = () => {
+                console.log(`Connection state for peer ${peerId}:`, pc.connectionState);
+                if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+                    console.log('Closing peer connection:', peerId);
+                    pc.close();
+                    peerConnections.delete(peerId);
+                } else if (pc.connectionState === 'closed') {
+                    console.log('Removing closed peer connection:', peerId);
+                    peerConnections.delete(peerId);
+                    remoteStreams.delete(peerId);
+                }
+            };
+        })
     }, [peerConnections])
 
     useEffect(() => {
-        console.clear();
         try {
-            navigator.clipboard.writeText(meetCode);
+            if (document?.hasFocus()) {
+                navigator.clipboard?.writeText(meetCode);
+            }
+            if (meetCode) {
+                initializeMeet();
+            }
         } catch (err) {
-            console.log(err)
-        }
-        if (meetCode) {
-            initializeMeet();
+            console.error('Error in connecting to meet');
+            router.replace('/');
         }
         return () => {
             // Cleanup
-            console.clear();
             localStream?.getTracks().forEach(track => track.stop());
             peerConnections.forEach(pc => pc.close());
         };
@@ -104,6 +122,8 @@ export default function VideoChat({
             router.replace('/');
             return;
         }
+
+        await setupLocalMedia();
 
         // Add participant to the meeting
         await setDoc(doc(db, 'calls', meetCode, 'participants', userId), {
@@ -136,11 +156,6 @@ export default function VideoChat({
                 }
             });
         });
-
-        // Initialize local media
-        if (isVideoOn || isMicOn) {
-            await setupLocalMedia();
-        }
     }
 
     useEffect(() => {
@@ -183,13 +198,21 @@ export default function VideoChat({
             }
 
             // Add tracks to all existing peer connections
-            peerConnections.forEach(pc => {
-                stream.getTracks().forEach(track => {
-                    pc.addTrack(track, stream);
-                });
+            peerConnections.forEach((pc, peerId) => {
+                if (pc && pc.signalingState !== 'closed') {
+                    stream.getTracks().forEach(track => {
+                        pc.addTrack(track, stream);
+                    });
+                } else {
+                    peerConnections.delete(peerId);
+                    remoteStreams.delete(peerId);
+                    console.log('Removing closed peer connection:', peerId);
+                }
             });
+            return stream;
         } catch (err) {
             console.error('Error accessing media devices:', err);
+            return null;
         }
     }
     
@@ -199,13 +222,21 @@ export default function VideoChat({
         // Store peer connection
         setPeerConnections(prev => new Map(prev.set(peerId, pc)));
 
-        // Add local tracks
-        localStream?.getTracks().forEach(track => {
-            pc.addTrack(track, localStream);
-        });
+        // Add local tracks to peer connection
+        if (localStream) {
+            localStream.getTracks().forEach(track => {
+                pc.addTrack(track, localStream);
+            });
+        } else {
+            const stream = await setupLocalMedia();
+            stream?.getTracks().forEach(track => {
+                pc.addTrack(track, stream);
+            });
+        }
 
         // Handle incoming tracks
         pc.ontrack = (event) => {
+            console.log(event.streams?.map(o => o.id), 'from handleOffer');
             const stream = event.streams[0];
             setRemoteStreams(prev => new Map(prev.set(peerId, stream)));
         };
@@ -244,9 +275,15 @@ export default function VideoChat({
         // Listen for ICE candidates from the offering peer
         onSnapshot(collection(db, 'calls', meetCode, 'candidates'), (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
-                if (change.type === 'added') {
+                const peerId =  change.doc.id;
+                const pc = peerConnections[peerId];
+                if (change.type === 'added' && pc && pc.signalingState !== 'closed') {
                     const candidate = new RTCIceCandidate(change.doc.data());
                     await pc.addIceCandidate(candidate);
+                } else {
+                    peerConnections.delete(peerId);
+                    remoteStreams.delete(peerId);
+                    console.log('Removing closed peer connection:', peerId);
                 }
             });
         });
@@ -255,13 +292,22 @@ export default function VideoChat({
     async function createPeerConnection(peerId: string) {
         const pc = new RTCPeerConnection(servers);
 
-        // Add local tracks to peer connection
-        localStream?.getTracks().forEach(track => {
-            pc.addTrack(track, localStream);
-        });
+        // Store peer connection
+        setPeerConnections(prev => new Map(prev.set(peerId, pc)));
 
+        // Log ICE gathering state changes
+        pc.onicegatheringstatechange = () => {
+            console.log(`ICE gathering state for peer ${peerId}:`, pc.iceGatheringState);
+        };
+
+        // Log ICE connection state changes
+        pc.oniceconnectionstatechange = () => {
+            console.log(`ICE connection state for peer ${peerId}:`, pc.iceConnectionState);
+        };
+        
         // Handle incoming tracks
         pc.ontrack = (event) => {
+            console.log(event.streams?.map(o => o.id), 'from createPeerConnection')
             const stream = event.streams[0];
             setRemoteStreams(prev => new Map(prev.set(peerId, stream)));
         };
@@ -270,13 +316,29 @@ export default function VideoChat({
         pc.onicecandidate = async (event) => {
             if (event.candidate) {
                 await setDoc(doc(db, 'calls', meetCode, 'candidates', peerId),
-                    event.candidate.toJSON()
-                );
-            }
-        };
+                event.candidate.toJSON()
+            );
+        }};
 
-        // Store peer connection
-        setPeerConnections(prev => new Map(prev.set(peerId, pc)));
+        // Add local tracks to peer connection
+        if (localStream) {
+            const pcSenders = pc.getSenders();
+            const addTrackIds = pcSenders.map(sender => sender.track?.id);
+            localStream?.getTracks().forEach(track => {
+                if (track.id && !addTrackIds.includes(track.id)) {
+                    pc.addTrack(track, localStream);
+                }
+            });
+        } else {
+            const stream = await setupLocalMedia();
+            const pcSenders = pc.getSenders();
+            const addTrackIds = pcSenders.map(sender => sender.track?.id);
+            stream?.getTracks().forEach(track => {
+                if (track.id && !addTrackIds.includes(track.id)) {
+                    pc.addTrack(track, stream);
+                }
+            });
+        }
 
         // Create and send offer
         const offer = await pc.createOffer();
