@@ -12,8 +12,7 @@ export default function Page() {
         async function createCall() {
             try {
                 const callDoc = await addDoc(collection(db, 'calls'), {
-                    createdAt: serverTimestamp(),
-                    participants: []
+                    createdAt: serverTimestamp()
                 });
                 router.push(`/video/${callDoc.id}`);
             } catch (err) {

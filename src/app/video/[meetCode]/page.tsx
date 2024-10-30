@@ -87,9 +87,9 @@ export default function VideoChat({
                     pc.close();
                     peerConnections.delete(peerId);
                 } else if (pc.connectionState === 'closed') {
-                    console.log('Removing closed peer connection:', peerId);
-                    peerConnections.delete(peerId);
-                    remoteStreams.delete(peerId);
+                    // console.log('Removing closed peer connection:', peerId);
+                    // peerConnections.delete(peerId);
+                    // remoteStreams.delete(peerId);
                 }
             };
         })
@@ -204,9 +204,9 @@ export default function VideoChat({
                         pc.addTrack(track, stream);
                     });
                 } else {
-                    peerConnections.delete(peerId);
-                    remoteStreams.delete(peerId);
-                    console.log('Removing closed peer connection:', peerId);
+                    // peerConnections.delete(peerId);
+                    // remoteStreams.delete(peerId);
+                    // console.log('Removing closed peer connection:', peerId);
                 }
             });
             return stream;
@@ -244,7 +244,7 @@ export default function VideoChat({
         // Handle ICE candidates
         pc.onicecandidate = async (event) => {
             if (event.candidate) {
-                await setDoc(doc(db, 'calls', meetCode, 'candidates', peerId),
+                await setDoc(doc(db, 'calls', meetCode, 'candidates', `${userId}:${peerId}`),
                     event.candidate.toJSON()
                 );
             }
@@ -275,15 +275,19 @@ export default function VideoChat({
         // Listen for ICE candidates from the offering peer
         onSnapshot(collection(db, 'calls', meetCode, 'candidates'), (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
-                const peerId =  change.doc.id;
+                const docId =  change.doc.id;
+                const [fromPeerId, toPeerId] = docId.split(':');
+                
+                if (toPeerId !== userId) return;
+
                 const pc = peerConnections[peerId];
                 if (change.type === 'added' && pc && pc.signalingState !== 'closed') {
                     const candidate = new RTCIceCandidate(change.doc.data());
                     await pc.addIceCandidate(candidate);
                 } else {
-                    peerConnections.delete(peerId);
-                    remoteStreams.delete(peerId);
-                    console.log('Removing closed peer connection:', peerId);
+                    // peerConnections.delete(peerId);
+                    // remoteStreams.delete(peerId);
+                    // console.log('Removing closed peer connection:', peerId);
                 }
             });
         });
@@ -315,7 +319,7 @@ export default function VideoChat({
         // Handle ICE candidates
         pc.onicecandidate = async (event) => {
             if (event.candidate) {
-                await setDoc(doc(db, 'calls', meetCode, 'candidates', peerId),
+                await setDoc(doc(db, 'calls', meetCode, 'candidates', `${userId}:${peerId}`),
                 event.candidate.toJSON()
             );
         }};
@@ -358,6 +362,26 @@ export default function VideoChat({
                     if (fromUserId === peerId && !pc.currentRemoteDescription) {
                         await pc.setRemoteDescription(new RTCSessionDescription(data as RTCSessionDescriptionInit));
                     }
+                }
+            });
+        });
+        
+        // Listen for ICE candidates from the answering peer
+        onSnapshot(collection(db, 'calls', meetCode, 'candidates'), (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
+                const docId =  change.doc.id;
+                const [fromPeerId, toPeerId] = docId.split(':');
+                
+                if (toPeerId !== userId) return;
+
+                const pc = peerConnections[peerId];
+                if (change.type === 'added' && pc && pc.signalingState !== 'closed') {
+                    const candidate = new RTCIceCandidate(change.doc.data());
+                    await pc.addIceCandidate(candidate);
+                } else {
+                    // peerConnections.delete(peerId);
+                    // remoteStreams.delete(peerId);
+                    // console.log('Removing closed peer connection:', peerId);
                 }
             });
         });
