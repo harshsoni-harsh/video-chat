@@ -1,12 +1,12 @@
 import React, { useRef, useEffect } from 'react';
 
 interface LocalVideoProps {
+    localVideoRef: React.RefObject<HTMLVideoElement>;
     localStream: MediaStream | null;
     userId: string;
 }
 
-const LocalVideo: React.FC<LocalVideoProps> = ({ localStream, userId }) => {
-    const localVideoRef = useRef<HTMLVideoElement>(null);
+const LocalVideo: React.FC<LocalVideoProps> = ({ localVideoRef, localStream, userId }) => {
 
     useEffect(() => {
         if (localVideoRef.current) {
