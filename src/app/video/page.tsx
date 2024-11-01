@@ -18,6 +18,7 @@ export default function Page() {
             } catch (err) {
                 console.error('Failed to create meeting:', err);
                 alert('Failed to create meeting. Please try again.');
+                router.replace('/');
             }
         }
         if (router)

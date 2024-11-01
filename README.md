@@ -32,3 +32,4 @@ This multi-user video chat application is a learning project aimed at gaining ha
 ## Resources
 
 https://webrtc-security.github.io/
+https://github.com/collab-project/videojs-record/blob/master/examples

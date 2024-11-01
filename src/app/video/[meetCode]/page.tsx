@@ -47,7 +47,7 @@ export default function VideoChat({
 }: {
     params: { meetCode: string };
 }) {
-    const [isMicOn, setMicOn] = useState(false);
+    const [isMicOn, setMicOn] = useState(true);
     const [isVideoOn, setVideoOn] = useState(true);
     const [isDialogOpen, setDialogOpen] = useState(false);
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -57,9 +57,7 @@ export default function VideoChat({
     const [peerConnections, setPeerConnections] = useState<
         Map<string, RTCPeerConnection>
     >(new Map());
-    const [userId] = useState<string>(
-        `user-${Math.random().toString(36).substring(2, 9)}`
-    );
+    const [userId, setUserId] = useState<string>('');
     const debouncedTimeoutRef = useRef(null); // For setupLocalMedia function
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -84,7 +82,23 @@ export default function VideoChat({
     //     return () => clearInterval(cleanup);
     // }, [cleanupInactiveStreams]);
 
-    console.log(userId, peerConnections, localStream);
+    useEffect(() => {
+        const generatedUserId = `user-${Math.random().toString(36).substring(2, 9)}`;
+        setUserId(generatedUserId);
+    }, []);
+
+    function removePeerConnection(peerId: string) {
+        setPeerConnections((prev) => {
+            prev.delete(peerId);
+            return prev;
+        });
+        setRemoteStreams((prev) => {
+            prev.delete(peerId);
+            return prev;
+        });
+    }
+
+    console.log(userId, peerConnections, localStream?.id, localStream?.getTracks().map(o => `${o.id}:${o.kind}`), remoteStreams.forEach((x,peer) => x?.getTracks().map(o => `peer-${peer}.${o.id}:${o.kind}`)));    
     useEffect(() => {
         console.log('pcs uf')
         if (peerConnections.size === 0) {
@@ -92,23 +106,26 @@ export default function VideoChat({
         }
         peerConnections.forEach((pc, peerId) => {
             console.log(peerId);
-            pc.onconnectionstatechange = () => {
+            pc.onconnectionstatechange = async () => {
                 console.log(
                     `Connection state for peer ${peerId}:`,
                     pc.connectionState
                 );
                 if (
-                    pc.connectionState === 'disconnected' ||
-                    pc.connectionState === 'failed'
+                    pc.connectionState === 'disconnected'
                 ) {
                     console.log('Closing peer connection:', peerId);
                     pc.close();
-                    peerConnections.delete(peerId);
-                    remoteStreams.delete(peerId);
-                    setRemoteStreams(remoteStreams);
+                    removePeerConnection(peerId);
+                    await deleteDoc(doc(db, `calls/${meetCode}/participants/${peerId}`));
+                } else if (pc.connectionState === 'failed') {
+                    console.info('Re establishing peer connection:', peerId);
+                    pc.close();
+                    sendOffer(peerId);
+                    removePeerConnection(peerId);
                 } else if (pc.connectionState === 'closed') {
-                    // console.log('Removing closed peer connection:', peerId);
-                    // peerConnections.delete(peerId);
+                    console.log('Removing closed peer connection:', peerId);
+                    removePeerConnection(peerId);
                 }
             };
         });
@@ -131,6 +148,11 @@ export default function VideoChat({
             // Cleanup
             localStream?.getTracks().forEach((track) => track.stop());
             peerConnections.forEach((pc) => pc.close());
+            (async function run() {
+                if (peerConnections.size === 0) {
+                    await deleteDoc(doc(db, `calls/${meetCode}`));
+                }
+            })()
         };
     }, [meetCode]);
 
@@ -174,7 +196,7 @@ export default function VideoChat({
                 if (change.type === 'added') {
                     const data = change.doc.data();
                     const peerId = data.fromPeerId;
-
+                    delete data.fromPeerId;
                     if (peerId !== userId) {
                         console.log('sending new answer', peerId);
                         await sendAnswer(peerId, data);
@@ -272,11 +294,11 @@ export default function VideoChat({
 
         // Handle incoming tracks
         pc.ontrack = (event) => {
+            const stream = event.streams[0] as MediaStream;
             console.log(
-                event.streams?.map((o) => o.id),
+                stream?.getTracks().map((o) => `${peerId}==${o.id}==${o.kind}`),
                 'from handleOffer'
             );
-            const stream = event.streams[0];
             setRemoteStreams((prev) => new Map(prev.set(peerId, stream)));
         };
 
@@ -414,11 +436,11 @@ export default function VideoChat({
 
         // Handle incoming tracks
         pc.ontrack = (event) => {
+            const stream = event.streams[0];
             console.log(
-                event.streams?.map((o) => o.id),
+                stream?.getTracks().map((o) => `${peerId}==${o.id}==${o.kind}`),
                 'from createPeerConnection'
             );
-            const stream = event.streams[0];
             setRemoteStreams((prev) => new Map(prev.set(peerId, stream)));
         };
 
@@ -472,7 +494,7 @@ export default function VideoChat({
             doc(db, 'calls', meetCode, 'answers', `${peerId}-${userId}`),
             async (snapshot) => {
                 const data = snapshot.data();
-                if (!pc.currentRemoteDescription && data?.type) {
+                if (!pc.currentRemoteDescription && data?.type && pc.signalingState !== 'stable') {
                     await pc.setRemoteDescription(
                         new RTCSessionDescription(
                             data as RTCSessionDescriptionInit
@@ -527,8 +549,7 @@ export default function VideoChat({
                         autoPlay
                         playsInline
                         muted
-                        controls={false}
-                        className="w-full rounded-lg border-2 border-slate-800 -scale-x-100 bg-gray-800"
+                        className="w-full rounded-lg border-2 border-slate-800 bg-gray-800"
                     />
                     <div className="absolute bottom-4 left-4">You {userId}</div>
                 </div>
@@ -539,8 +560,7 @@ export default function VideoChat({
                         <video
                             autoPlay
                             playsInline
-                            controls={false}
-                            className="w-full rounded-lg border-2 border-slate-800 -scale-x-100"
+                            className="w-full rounded-lg border-2 border-slate-800"
                             ref={(el) => {
                                 if (el) el.srcObject = stream;
                             }}
@@ -551,7 +571,7 @@ export default function VideoChat({
                     </div>
                 ))}
             </div>
-            <div className="opacity-30 focus:opacity-100 hover:opacity-100 transition-opacity duration-200 fixed bottom-3 flex flex-wrap justify-center gap-2 rounded-xl p-3 bg-slate-800">
+            <div className="opacity-30 delay-1000 hover:delay-0 focus:delay-0 focus:opacity-100 hover:opacity-100 transition-opacity duration-300 fixed bottom-3 flex flex-wrap justify-center gap-2 rounded-xl p-3 bg-slate-800">
                 {isMicOn ? (
                     <Mic
                         className="rounded-lg bg-blue-500 p-2 size-10"
