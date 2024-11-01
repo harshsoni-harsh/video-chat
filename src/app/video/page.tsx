@@ -14,6 +14,9 @@ export default function Page() {
                 const callDoc = await addDoc(collection(db, 'calls'), {
                     createdAt: serverTimestamp()
                 });
+                if (document?.hasFocus()) {
+                    navigator.clipboard?.writeText(callDoc.id);
+                }    
                 router.push(`/video/${callDoc.id}`);
             } catch (err) {
                 console.error('Failed to create meeting:', err);
