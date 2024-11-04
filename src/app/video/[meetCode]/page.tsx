@@ -29,7 +29,6 @@ export default function VideoChat({
     }, []);
     const {remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isVideoOn, isMicOn});
     const {localStream} = useMediaStream(isMicOn, isVideoOn, peerConnections, localVideoRef);
-    console.log(remoteStreams, peerConnections, localStream)
 
     if (meetCode && userId) {
         const toggleMic = () => setMicOn((prev) => !prev);
