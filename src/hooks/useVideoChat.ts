@@ -25,35 +25,58 @@ export const servers = {
     iceCandidatePoolSize: 10,
 };
 
-function debounce(func: (any) => void, delay: number) {
-    let timeoutId;
-    return function(...args) {
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-        }
-        timeoutId = setTimeout(() => {
-            func.apply(this, args);
-        }, delay);
-    };
-}
-
-export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
+export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoRef }) {
     const [remoteStreams, setRemoteStreams] = useState<
     Map<string, MediaStream>
     >(new Map());
     const [peerConnections, setPeerConnections] = useState<
     Map<string, RTCPeerConnection>
     >(new Map());
-    const debouncedTimeoutRef = useRef(null); // For setupLocalMedia function
-    
-    const localStreamRef = useRef<MediaStream | null>(null);
-    const localVideoRef = useRef<HTMLVideoElement>(null);
+    const [retriedPC, setRetriedPC] = useState([]);
     const unsubscribeRefs = useRef<Unsubscribe[]>([]);
     const localPcs = useRef<RTCPeerConnection[]>([]);
+    const localStreamRef = useRef<MediaStream | null>(null);
 
     const router = useRouter();
 
     const enableLogs = process.env.NODE_ENV === 'development';
+
+    useEffect(() => {
+        try {
+            (async () => {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true,
+                });
+                stream.getTracks().forEach((track) => track.enabled = false);
+                localStreamRef.current = stream;
+                if (localStreamRef.current) {
+                    localVideoRef.current.srcObject = stream;
+                }
+            })();
+        } catch (e) {
+            console.error('Error accessing media devices:', e);
+        }
+        return () => {
+            if (localStreamRef.current) {
+                localStreamRef.current.getTracks().forEach((track) => track.stop());
+            }
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = null;
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        localStreamRef.current?.getAudioTracks().forEach((track) => track.enabled = isMicOn);
+    }, [isMicOn]);
+
+    useEffect(() => {
+        localStreamRef.current?.getVideoTracks().forEach((track) => track.enabled = isVideoOn);
+        if (localStreamRef.current) {
+            localVideoRef.current.srcObject = localStreamRef.current;
+        }
+    }, [isVideoOn])
 
     function removePeerConnection(peerId: string) {
         setPeerConnections((prev) => {
@@ -124,7 +147,6 @@ export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
                 })();
                 unsubscribeRefs.current.forEach((unsubcribe) => unsubcribe()); // Includes firestore listeners
             }
-            localStreamRef.current?.getTracks().forEach((track) => track.stop());
             localPcs.current.forEach((pc) => pc.close());
             enableLogs && console.log('cleaned up video chat');
         };
@@ -187,65 +209,6 @@ export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
         unsubscribeRefs.current.push(unsubscribeOffers);
     }
 
-    useEffect(() => {
-        // Clear any previous timeout to debounce
-        if (debouncedTimeoutRef.current) {
-            localStreamRef.current?.getAudioTracks()?.forEach((track) => track.stop());
-            localStreamRef.current?.getVideoTracks()?.forEach((track) => track.stop());
-            clearTimeout(debouncedTimeoutRef.current);
-        }
-        debouncedTimeoutRef.current = setTimeout(() => {
-            if (!isVideoOn) {
-                localVideoRef.current.srcObject = null;
-                localStreamRef.current?.getVideoTracks()?.forEach((track) => track.stop());
-            }
-            if (!isMicOn) {
-                localStreamRef.current?.getAudioTracks()?.forEach((track) => track.stop());
-            }
-            if (isMicOn || isVideoOn) {
-                setupLocalMedia();
-            }
-        }, 300); // Debouncing of 300 ms for effectiveness
-
-        return () => {
-            if (debouncedTimeoutRef.current) {
-                clearTimeout(debouncedTimeoutRef.current);
-            }
-        };
-    }, [isMicOn, isVideoOn]);
-
-    async function setupLocalMedia() {
-        try {
-            if (localStreamRef.current) {
-                const oldTracks = localStreamRef.current.getTracks();
-                oldTracks.forEach((track) => track.stop());
-            }
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: isVideoOn,
-                audio: isMicOn,
-            });
-            enableLogs && console.log('new stream');
-            localStreamRef.current = stream;
-
-            if (localVideoRef.current) {
-                localVideoRef.current.srcObject = stream;
-            }
-
-            // Add tracks to all existing peer connections
-            peerConnections.forEach((pc, peerId) => {
-                if (pc && pc.signalingState !== 'closed') {
-                    stream.getTracks().forEach((track) => {
-                        pc.addTrack(track, stream);
-                    });
-                }
-            });
-            return stream;
-        } catch (err) {
-            console.error('Error accessing media devices:', err);
-            return null;
-        }
-    }
-
     async function sendAnswer(userId: string, peerId: string, offerData: any) {
         let pc: RTCPeerConnection;
         if (peerConnections.has(peerId)) {
@@ -270,14 +233,7 @@ export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
                 }
             });
         } else {
-            const stream = await setupLocalMedia();
-            const pcSenders = pc.getSenders();
-            const addedTracks = pcSenders.map((sender) => sender.track?.id);
-            stream?.getTracks().forEach((track) => {
-                if (track.id && !addedTracks.includes(track.id)) {
-                    pc.addTrack(track, stream);
-                }
-            });
+            enableLogs && console.log('localStreamRef.current is null');
         }
 
         // Handle incoming tracks
@@ -325,12 +281,6 @@ export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
                 );
             }
         };
-
-        pc.onicecandidateerror = (event) => {
-            debounce((error) => {
-                enableLogs && console.log('ICE candidate error:', error);
-            }, 2000)(event);
-        }
 
         // Add connection state change logging
         pc.onconnectionstatechange = () => {
@@ -394,6 +344,27 @@ export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
                 });
             }
         );
+
+        let timeout = null;
+        pc.onicecandidateerror = (event) => {
+            if (timeout) return;
+            if (retriedPC.includes(peerId)) {
+                enableLogs && console.log('Network error with ', peerId, event.errorText);
+                return;
+            }
+            if (pc.connectionState === 'new') {
+                enableLogs && console.log('ICE candidate error: restarting ICE', peerId);
+                pc.close();
+                unsubscribeCandidates();
+                retriedPC.push(peerId);
+            } else {
+                enableLogs && console.log('ICE candidate error:', event.errorText, peerId);
+            }
+            timeout = setTimeout(() => {
+                timeout = null
+            }, 2000);
+        }
+        
         unsubscribeRefs.current.push(unsubscribeCandidates);
     }
 
@@ -452,12 +423,6 @@ export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
             }
         };
 
-        pc.onicecandidateerror = (event) => {
-            debounce((error) => {
-                enableLogs && console.log('ICE candidate error:', error);
-            }, 2000)(event);
-        }
-
         pc.onnegotiationneeded = async () => {
             enableLogs && console.log('Negotiation needed for peer', peerId);
             try {
@@ -508,14 +473,7 @@ export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
                 }
             });
         } else {
-            const stream = await setupLocalMedia();
-            const pcSenders = pc.getSenders();
-            const addedTracks = pcSenders.map((sender) => sender.track?.id);
-            stream?.getTracks().forEach((track) => {
-                if (track.id && !addedTracks.includes(track.id)) {
-                    pc.addTrack(track, stream);
-                }
-            });
+            console.log('localStreamRef.current is null');
         }
 
         pc.onsignalingstatechange = () => {
@@ -533,6 +491,7 @@ export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
                 if (
                     !pc.currentRemoteDescription &&
                     data?.type &&
+                    pc?.signalingState !== 'stable' &&
                     pc.signalingState !== 'closed'
                 ) {
                     await pc.setRemoteDescription(
@@ -543,6 +502,7 @@ export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
                 }
             }
         );
+
         unsubscribeRefs.current.push(unsubscribeAnswers);
 
         // Listen for ICE candidates from the answering peer
@@ -572,6 +532,29 @@ export function useVideoChat({ meetCode, userId, isVideoOn, isMicOn }) {
                 });
             }
         );
+
+        let timeout = null;
+        pc.onicecandidateerror = (event) => {
+            if (timeout) return;
+            if (retriedPC.includes(peerId)) {
+                enableLogs && console.log('Network error with ', peerId, event.errorText);
+                return;
+            }
+            if (pc.connectionState === 'new') {
+                enableLogs && console.log('ICE candidate error: restarting ICE', peerId);
+                pc.close();
+                unsubscribeAnswers();
+                unsubscribeCandidates();
+                sendOffer(userId, peerId);
+                retriedPC.push(peerId);
+            } else {
+                enableLogs && console.log('ICE candidate error:', event.errorText, peerId);
+            }
+            timeout = setTimeout(() => {
+                timeout = null
+            }, 2000);
+        }
+        
         unsubscribeRefs.current.push(unsubscribeCandidates);
     }
 

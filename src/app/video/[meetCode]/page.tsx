@@ -5,7 +5,6 @@ import LocalVideo from '@/components/LocalVideo';
 import Controls from '@/components/Controls';
 import RemoteVideo from '@/components/RemoteVideo';
 import { useVideoChat } from '@/hooks/useVideoChat';
-import useMediaStream from '@/hooks/useMediaStream';
 import { useRouter } from 'next/navigation';
 
 export default function VideoChat({
@@ -13,8 +12,8 @@ export default function VideoChat({
 }: {
     params: Usable<any>;
 }) {
-    const [isMicOn, setMicOn] = useState(true);
-    const [isVideoOn, setVideoOn] = useState(true);
+    const [isMicOn, setMicOn] = useState(false);
+    const [isVideoOn, setVideoOn] = useState(false);
     const [userId, setUserId] = useState<string>('');
     const { meetCode } = use(params);
     const router = useRouter();
@@ -27,8 +26,7 @@ export default function VideoChat({
         setUserId(userId);
         console.warn('New user ID:', userId);
     }, []);
-    const {remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isVideoOn, isMicOn});
-    const {localStream} = useMediaStream(isMicOn, isVideoOn, peerConnections, localVideoRef);
+    const {localStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef});
 
     if (meetCode && userId) {
         const toggleMic = () => setMicOn((prev) => !prev);
