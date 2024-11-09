@@ -17,28 +17,29 @@ import { useRouter } from 'next/navigation';
 // WebRTC configuration
 export const servers = {
     iceServers: [
-        {
-            urls: ['turn:relay1.expressturn.com:3478'],
-            username: 'efXBO01C2BGJO28IQ8',
-            credential: 'nrfwMztTvVCstVHr',
-        },
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun.l.google.com:5349' }
+        { urls: 'stun:stun.l.google.com:5349' },
     ],
     iceCandidatePoolSize: 10,
 };
 
-export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoRef }) {
+export function useVideoChat({
+    meetCode,
+    userId,
+    isMicOn,
+    isVideoOn,
+    localVideoRef,
+}) {
     const [remoteStreams, setRemoteStreams] = useState<
-    Map<string, MediaStream>
+        Map<string, MediaStream>
     >(new Map());
     const [peerConnections, setPeerConnections] = useState<
-    Map<string, RTCPeerConnection>
+        Map<string, RTCPeerConnection>
     >(new Map());
     const [retriedPC, setRetriedPC] = useState([]);
     const unsubscribeRefs = useRef<Unsubscribe[]>([]);
     const localPcs = useRef<RTCPeerConnection[]>([]);
-    const localStreamRef = useRef<MediaStream | null>(null);
+    const localStreamRef = useRef<MediaStream[] | null>([]);
 
     const router = useRouter();
 
@@ -47,14 +48,21 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
     useEffect(() => {
         try {
             (async () => {
-                const stream = await navigator.mediaDevices.getUserMedia({
+                const videoStream = await navigator.mediaDevices.getUserMedia({
                     video: true,
+                });
+                const audioStream = await navigator.mediaDevices.getUserMedia({
                     audio: true,
                 });
-                stream.getTracks().forEach((track) => track.enabled = false);
-                localStreamRef.current = stream;
-                if (localStreamRef.current) {
-                    localVideoRef.current.srcObject = stream;
+                videoStream
+                    .getTracks()
+                    .forEach((track) => (track.enabled = false));
+                audioStream
+                    .getTracks()
+                    .forEach((track) => (track.enabled = false));
+                localStreamRef.current.push(videoStream, audioStream);
+                if (localStreamRef.current.length > 0) {
+                    localVideoRef.current.srcObject = videoStream;
                 }
             })();
         } catch (e) {
@@ -62,24 +70,32 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         }
         return () => {
             if (localStreamRef.current) {
-                localStreamRef.current.getTracks().forEach((track) => track.stop());
+                localStreamRef.current.forEach((stream) =>
+                    stream.getTracks().forEach((track) => track.stop())
+                );
             }
             if (localVideoRef.current) {
                 localVideoRef.current.srcObject = null;
             }
-        }
+        };
     }, []);
 
     useEffect(() => {
-        localStreamRef.current?.getAudioTracks().forEach((track) => track.enabled = isMicOn);
+        localStreamRef.current
+            ?.at(1)
+            ?.getAudioTracks()
+            .forEach((track) => (track.enabled = isMicOn));
     }, [isMicOn]);
 
     useEffect(() => {
-        localStreamRef.current?.getVideoTracks().forEach((track) => track.enabled = isVideoOn);
-        if (localStreamRef.current) {
-            localVideoRef.current.srcObject = localStreamRef.current;
+        localStreamRef.current
+            ?.at(0)
+            ?.getVideoTracks()
+            .forEach((track) => (track.enabled = isVideoOn));
+        if (localVideoRef.current) {
+            localVideoRef.current.srcObject = localStreamRef.current[0];
         }
-    }, [isVideoOn])
+    }, [isVideoOn]);
 
     function removePeerConnection(peerId: string) {
         setPeerConnections((prev) => {
@@ -89,7 +105,10 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         });
         setRemoteStreams((prev) => {
             const updatedMap = new Map(prev);
-            updatedMap.get(peerId)?.getTracks().forEach((track) => track.stop());
+            updatedMap
+                .get(peerId)
+                ?.getTracks()
+                .forEach((track) => track.stop());
             updatedMap.delete(peerId);
             return updatedMap;
         });
@@ -99,7 +118,7 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         if (peerConnections.size === 0) {
             remoteStreams.forEach((stream) => {
                 stream.getTracks().forEach((track) => track.stop());
-            })
+            });
             setRemoteStreams(new Map());
         }
         peerConnections.forEach((pc, peerId) => {
@@ -124,10 +143,17 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         try {
             if (document?.hasFocus()) {
                 setTimeout(() => {
-                    navigator.clipboard?.writeText(meetCode)
-                    .then(() => {console.log('Meet code', meetCode,  'copied to clipboard')})
-                    .catch(e => console.log('clipboard err:', e));
-                }, 0)
+                    navigator.clipboard
+                        ?.writeText(meetCode)
+                        .then(() => {
+                            console.log(
+                                'Meet code',
+                                meetCode,
+                                'copied to clipboard'
+                            );
+                        })
+                        .catch((e) => console.log('clipboard err:', e));
+                }, 0);
             }
             if (meetCode && userId) {
                 initializeMeet();
@@ -143,8 +169,12 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
                     if (peerConnections.size === 0) {
                         await deleteDoc(doc(db, `calls/${meetCode}`));
                     } else {
-                        await deleteDoc(doc(db, `calls/${meetCode}/participants/${userId}`));
-                        await deleteDoc(doc(db, `calls/${meetCode}/offers/${userId}`));
+                        await deleteDoc(
+                            doc(db, `calls/${meetCode}/participants/${userId}`)
+                        );
+                        await deleteDoc(
+                            doc(db, `calls/${meetCode}/offers/${userId}`)
+                        );
                         peerConnections.forEach((pc) => pc.close());
                     }
                 })();
@@ -168,10 +198,13 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
 
         // Add participant to the meeting
         const joinedAt = performance.now() + performance.timeOrigin;
-        await setDoc(doc(collection(db, 'calls', meetCode, 'participants'), userId), {
-            userId,
-            joinedAt,
-        })
+        await setDoc(
+            doc(collection(db, 'calls', meetCode, 'participants'), userId),
+            {
+                userId,
+                joinedAt,
+            }
+        );
 
         // Listen for new participants
         const unsubscribeParticipants = onSnapshot(
@@ -180,8 +213,14 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
                 snapshot.docChanges().forEach(async (change) => {
                     const peerId = change.doc.id;
                     const data = change.doc.data();
-                    enableLogs && console.log('participant change', change.type, peerId);
-                    if (change.type === 'added' && peerId !== userId && !peerConnections.has(peerId) && data.joinedAt > joinedAt) {
+                    enableLogs &&
+                        console.log('participant change', change.type, peerId);
+                    if (
+                        change.type === 'added' &&
+                        peerId !== userId &&
+                        !peerConnections.has(peerId) &&
+                        data.joinedAt > joinedAt
+                    ) {
                         enableLogs && console.log('new participant', peerId);
                         await sendOffer(userId, peerId);
                     } else if (change.type === 'removed') {
@@ -193,16 +232,19 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         unsubscribeRefs.current.push(unsubscribeParticipants);
 
         // Listen for offers
-        const unsubscribeOffers = onSnapshot(collection(db, 'calls', meetCode, 'offers', userId, 'collection'),
+        const unsubscribeOffers = onSnapshot(
+            collection(db, 'calls', meetCode, 'offers', userId, 'collection'),
             (snapshot) => {
                 snapshot.docChanges().forEach(async (change) => {
                     if (change.type === 'added') {
                         const data = change.doc.data();
                         const peerId = data.fromPeerId;
                         delete data.fromPeerId;
-                        enableLogs && console.log('offer change', change.type, peerId);
+                        enableLogs &&
+                            console.log('offer change', change.type, peerId);
                         if (peerId !== userId && userId && peerId) {
-                            enableLogs && console.log('sending new answer', peerId);
+                            enableLogs &&
+                                console.log('sending new answer', peerId);
                             await sendAnswer(userId, peerId, data);
                         }
                     }
@@ -216,10 +258,17 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         let pc: RTCPeerConnection;
         if (peerConnections.has(peerId)) {
             pc = peerConnections.get(peerId);
-            enableLogs && console.log('sendAnswer: pc for',peerId, 'from', userId);
+            enableLogs &&
+                console.log('sendAnswer: pc for', peerId, 'from', userId);
         } else {
             pc = new RTCPeerConnection(servers);
-            enableLogs && console.log('sendAnswer: new pc created for',peerId, 'from', userId);
+            enableLogs &&
+                console.log(
+                    'sendAnswer: new pc created for',
+                    peerId,
+                    'from',
+                    userId
+                );
             localPcs.current.push(pc);
             // Store peer connection
             setPeerConnections((prev) => new Map(prev.set(peerId, pc)));
@@ -230,11 +279,15 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         if (localStreamRef.current) {
             const pcSenders = pc.getSenders();
             const addedTracks = pcSenders.map((sender) => sender.track?.id);
-            localStreamRef.current?.getTracks().forEach((track) => {
+            const localStream = new MediaStream([
+                ...localStreamRef.current.at(0)?.getTracks() ?? [],
+                ...localStreamRef.current.at(1)?.getTracks() ?? [],
+            ]);
+            localStream.getTracks().forEach((track) => {
                 if (track.id && !addedTracks.includes(track.id)) {
-                    pc.addTrack(track, localStreamRef.current);
+                    pc.addTrack(track, localStream);
                 }
-            });
+            })
         } else {
             enableLogs && console.log('localStreamRef.current is null');
         }
@@ -242,28 +295,38 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         // Handle incoming tracks
         pc.ontrack = (event) => {
             const stream = event.streams[0] as MediaStream;
-            enableLogs && console.log(
-                stream?.getTracks().map((o) => `${peerId}==${o.id}==${o.kind}`),
-                'from handleOffer'
-            );
+            enableLogs &&
+                console.log(
+                    stream
+                        ?.getTracks()
+                        .map((o) => `${peerId}==${o.id}==${o.kind}`),
+                    'from handleOffer'
+                );
             setRemoteStreams((prev) => new Map(prev.set(peerId, stream)));
         };
 
         pc.onicegatheringstatechange = async () => {
-            enableLogs && console.log(
-                `ICE gathering state for peer ${peerId}:`,
-                pc.iceGatheringState
-            );
+            enableLogs &&
+                console.log(
+                    `ICE gathering state for peer ${peerId}:`,
+                    pc.iceGatheringState
+                );
         };
 
         // Log ICE connection state changes
         pc.oniceconnectionstatechange = () => {
-            enableLogs && console.log(
-                `ICE connection state for peer ${peerId}:`,
-                pc.iceConnectionState
-            );
+            enableLogs &&
+                console.log(
+                    `ICE connection state for peer ${peerId}:`,
+                    pc.iceConnectionState
+                );
             if (pc.iceConnectionState === 'failed') {
-                enableLogs && console.log('ICE connection failed for peer', peerId, 'Restarting...');
+                enableLogs &&
+                    console.log(
+                        'ICE connection failed for peer',
+                        peerId,
+                        'Restarting...'
+                    );
                 pc.restartIce();
             }
         };
@@ -287,17 +350,19 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
 
         // Add connection state change logging
         pc.onconnectionstatechange = () => {
-            enableLogs && console.log(
-                `Connection state for peer ${peerId}:`,
-                pc.connectionState
-            );
+            enableLogs &&
+                console.log(
+                    `Connection state for peer ${peerId}:`,
+                    pc.connectionState
+                );
         };
 
         pc.onsignalingstatechange = () => {
-            enableLogs && console.log(
-                `Signaling state for peer ${peerId}:`,
-                pc.signalingState
-            );
+            enableLogs &&
+                console.log(
+                    `Signaling state for peer ${peerId}:`,
+                    pc.signalingState
+                );
         };
 
         // Set remote description (offer)
@@ -329,7 +394,12 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
                 snapshot.docChanges().forEach(async (change) => {
                     const data = change.doc.data();
                     const pc = peerConnections.get(peerId);
-                    enableLogs && console.log('adding offcandidates', change.type, peerId);
+                    enableLogs &&
+                        console.log(
+                            'adding offcandidates',
+                            change.type,
+                            peerId
+                        );
                     if (
                         change.type === 'added' &&
                         data &&
@@ -340,8 +410,11 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
                         try {
                             await pc.addIceCandidate(candidate);
                         } catch (e) {
-                            enableLogs && console.error('Error adding ice candidate:', e);
-                            alert('Some error occurred in connecting someone. Please try again.');
+                            enableLogs &&
+                                console.error('Error adding ice candidate:', e);
+                            alert(
+                                'Some error occurred in connecting someone. Please try again.'
+                            );
                         }
                     }
                 });
@@ -352,28 +425,41 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         pc.onicecandidateerror = (event) => {
             if (timeout) return;
             if (retriedPC.includes(peerId)) {
-                enableLogs && console.log('Network error with ', peerId, event.errorText);
+                enableLogs &&
+                    console.log('Network error with ', peerId, event.errorText);
                 return;
             }
             if (pc.connectionState === 'new') {
-                enableLogs && console.log('ICE candidate error: restarting ICE', peerId);
+                enableLogs &&
+                    console.log('ICE candidate error: restarting ICE', peerId);
                 pc.close();
                 unsubscribeCandidates();
                 retriedPC.push(peerId);
             } else {
-                enableLogs && console.log('ICE candidate error:', event.errorText, peerId);
+                enableLogs &&
+                    console.log(
+                        'ICE candidate error:',
+                        event.errorText,
+                        peerId
+                    );
             }
             timeout = setTimeout(() => {
-                timeout = null
+                timeout = null;
             }, 2000);
-        }
-        
+        };
+
         unsubscribeRefs.current.push(unsubscribeCandidates);
     }
 
     async function sendOffer(userId: string, peerId: string) {
         const pc = new RTCPeerConnection(servers);
-        enableLogs && console.log('sendOffer: new pc created for', peerId, 'from', userId);
+        enableLogs &&
+            console.log(
+                'sendOffer: new pc created for',
+                peerId,
+                'from',
+                userId
+            );
         localPcs.current.push(pc);
 
         // Store peer connection
@@ -381,20 +467,27 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
 
         // Log ICE gathering state changes
         pc.onicegatheringstatechange = async () => {
-            enableLogs && console.log(
-                `ICE gathering state for peer ${peerId}:`,
-                pc.iceGatheringState
-            );
+            enableLogs &&
+                console.log(
+                    `ICE gathering state for peer ${peerId}:`,
+                    pc.iceGatheringState
+                );
         };
 
         // Log ICE connection state changes
         pc.oniceconnectionstatechange = () => {
-            enableLogs && console.log(
-                `ICE connection state for peer ${peerId}:`,
-                pc.iceConnectionState
-            );
+            enableLogs &&
+                console.log(
+                    `ICE connection state for peer ${peerId}:`,
+                    pc.iceConnectionState
+                );
             if (pc.iceConnectionState === 'failed') {
-                enableLogs && console.log('ICE connection failed for peer', peerId, 'Restarting...');
+                enableLogs &&
+                    console.log(
+                        'ICE connection failed for peer',
+                        peerId,
+                        'Restarting...'
+                    );
                 pc.restartIce();
             }
         };
@@ -402,10 +495,13 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         // Handle incoming tracks
         pc.ontrack = (event) => {
             const stream = event.streams[0];
-            enableLogs && console.log(
-                stream?.getTracks().map((o) => `${peerId}==${o.id}==${o.kind}`),
-                'from createPeerConnection'
-            );
+            enableLogs &&
+                console.log(
+                    stream
+                        ?.getTracks()
+                        .map((o) => `${peerId}==${o.id}==${o.kind}`),
+                    'from createPeerConnection'
+                );
             setRemoteStreams((prev) => new Map(prev.set(peerId, stream)));
         };
 
@@ -430,19 +526,25 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
             enableLogs && console.log('Negotiation needed for peer', peerId);
             try {
                 // Check if an offer/answer exchange is already in progress
-                if (pc.iceConnectionState === "connected" || 
-                    pc.iceConnectionState === "new") {
-                    
+                if (
+                    pc.iceConnectionState === 'connected' ||
+                    pc.iceConnectionState === 'new'
+                ) {
                     // If there is an ongoing negotiation, we should not create a new offer
-                    if (pc.signalingState === "have-local-offer" || 
-                        pc.signalingState === "have-remote-offer") {
-                        enableLogs && console.log("Negotiation is in progress, skipping offer creation.");
+                    if (
+                        pc.signalingState === 'have-local-offer' ||
+                        pc.signalingState === 'have-remote-offer'
+                    ) {
+                        enableLogs &&
+                            console.log(
+                                'Negotiation is in progress, skipping offer creation.'
+                            );
                         return; // Skip creating a new offer
                     }
-        
+
                     const offer = await pc.createOffer();
                     await pc.setLocalDescription(offer);
-        
+
                     await addDoc(
                         collection(
                             db,
@@ -459,10 +561,13 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
                         }
                     );
                 } else {
-                    enableLogs && console.log("Connection is not in a valid state for offer creation.");
+                    enableLogs &&
+                        console.log(
+                            'Connection is not in a valid state for offer creation.'
+                        );
                 }
             } catch (error) {
-                enableLogs && console.error("Error during negotiation:", error);
+                enableLogs && console.error('Error during negotiation:', error);
             }
         };
 
@@ -470,20 +575,25 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         if (localStreamRef.current) {
             const pcSenders = pc.getSenders();
             const addedTracks = pcSenders.map((sender) => sender.track?.id);
-            localStreamRef.current?.getTracks().forEach((track) => {
+            const localStream = new MediaStream([
+                ...localStreamRef.current.at(0)?.getTracks() ?? [],
+                ...localStreamRef.current.at(1)?.getTracks() ?? [],
+            ]);
+            localStream.getTracks().forEach((track) => {
                 if (track.id && !addedTracks.includes(track.id)) {
-                    pc.addTrack(track, localStreamRef.current);
+                    pc.addTrack(track, localStream);
                 }
-            });
+            })
         } else {
             console.log('localStreamRef.current is null');
         }
 
         pc.onsignalingstatechange = () => {
-            enableLogs && console.log(
-                `Signaling state for peer ${peerId}:`,
-                pc.signalingState
-            );
+            enableLogs &&
+                console.log(
+                    `Signaling state for peer ${peerId}:`,
+                    pc.signalingState
+                );
         };
 
         // Listen for answer
@@ -522,7 +632,12 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
                 snapshot.docChanges().forEach(async (change) => {
                     const data = change.doc.data();
                     const pc = peerConnections.get(peerId);
-                    enableLogs && console.log('adding anscandidates', change.type, peerId);
+                    enableLogs &&
+                        console.log(
+                            'adding anscandidates',
+                            change.type,
+                            peerId
+                        );
                     if (
                         change.type === 'added' &&
                         data &&
@@ -540,26 +655,38 @@ export function useVideoChat({ meetCode, userId, isMicOn, isVideoOn, localVideoR
         pc.onicecandidateerror = (event) => {
             if (timeout) return;
             if (retriedPC.includes(peerId)) {
-                enableLogs && console.log('Network error with ', peerId, event.errorText);
+                enableLogs &&
+                    console.log('Network error with ', peerId, event.errorText);
                 return;
             }
             if (pc.connectionState === 'new') {
-                enableLogs && console.log('ICE candidate error: restarting ICE', peerId);
+                enableLogs &&
+                    console.log('ICE candidate error: restarting ICE', peerId);
                 pc.close();
                 unsubscribeAnswers();
                 unsubscribeCandidates();
                 sendOffer(userId, peerId);
                 retriedPC.push(peerId);
             } else {
-                enableLogs && console.log('ICE candidate error:', event.errorText, peerId);
+                enableLogs &&
+                    console.log(
+                        'ICE candidate error:',
+                        event.errorText,
+                        peerId
+                    );
             }
             timeout = setTimeout(() => {
-                timeout = null
+                timeout = null;
             }, 2000);
-        }
-        
+        };
+
         unsubscribeRefs.current.push(unsubscribeCandidates);
     }
 
-    return {localStream: localStreamRef.current, remoteStreams, peerConnections};
+    return {
+        videoStream: localStreamRef.current.at(0),
+        audioStream: localStreamRef.current.at(1),
+        remoteStreams,
+        peerConnections,
+    };
 }

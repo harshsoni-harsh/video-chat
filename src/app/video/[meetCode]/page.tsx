@@ -26,17 +26,22 @@ export default function VideoChat({
         setUserId(userId);
         console.warn('New user ID:', userId);
     }, []);
-    const {localStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef});
+    const {videoStream, audioStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef});
 
     if (meetCode && userId) {
         const toggleMic = () => setMicOn((prev) => !prev);
         const toggleVideo = () => setVideoOn((prev) => !prev);
 
         function disconnectCall() {
-            localStream?.getTracks().forEach((track) => track.stop());
+            videoStream.getTracks().forEach((track) => track.stop());
+            audioStream.getTracks().forEach((track) => track.stop());
             peerConnections.forEach((pc) => pc.close());
             router.replace('/');
         }
+        const localStream = new MediaStream([
+            ...videoStream?.getTracks() ?? [],
+            ...audioStream?.getTracks() ?? []
+        ]);
     
         return (
             <div className="flex flex-col h-screen items-center w-screen">
