@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation';
 export default function VideoChat({
     params,
 }: {
-    params: Usable<any>;
+    params: Promise<any>;
 }) {
     const [isMicOn, setMicOn] = useState(false);
     const [isVideoOn, setVideoOn] = useState(false);
