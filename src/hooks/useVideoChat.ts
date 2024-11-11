@@ -30,6 +30,14 @@ export function useVideoChat({
     isMicOn,
     isVideoOn,
     localVideoRef,
+    isProctor
+}: {
+    meetCode: string,
+    userId: string,
+    isMicOn: boolean,
+    isVideoOn: boolean,
+    localVideoRef: React.MutableRefObject<HTMLVideoElement | null>,
+    isProctor?: boolean
 }) {
     const [remoteStreams, setRemoteStreams] = useState<
         Map<string, MediaStream>
@@ -37,7 +45,6 @@ export function useVideoChat({
     const [peerConnections, setPeerConnections] = useState<
         Map<string, RTCPeerConnection>
     >(new Map());
-    const [retriedPC, setRetriedPC] = useState([]);
     const unsubscribeRefs = useRef<Unsubscribe[]>([]);
     const localPcs = useRef<RTCPeerConnection[]>([]);
     const localStreamRef = useRef<MediaStream[] | null>([]);
@@ -45,6 +52,7 @@ export function useVideoChat({
     const router = useRouter();
 
     const enableLogs = process.env.NODE_ENV === 'development';
+    const meetCollection = isProctor ? "proctor" : "calls"
 
     useEffect(() => {
         try {
@@ -62,7 +70,7 @@ export function useVideoChat({
                     .getTracks()
                     .forEach((track) => (track.enabled = false));
                 localStreamRef.current.push(videoStream, audioStream);
-                if (localStreamRef.current.length > 0) {
+                if (localStreamRef.current && localStreamRef.current.length > 0) {
                     localVideoRef.current.srcObject = videoStream;
                 }
             })();
@@ -128,7 +136,7 @@ export function useVideoChat({
                     pc.close();
                     removePeerConnection(peerId);
                     await deleteDoc(
-                        doc(db, `calls/${meetCode}/participants/${peerId}`)
+                        doc(db, `${meetCollection}/${meetCode}/participants/${peerId}`)
                     );
                 } else if (pc.connectionState === 'failed') {
                     pc.close();
@@ -165,198 +173,88 @@ export function useVideoChat({
         }
         return () => {
             // Cleanup
-            if (meetCode && userId) {
-                (async () => {
-                    if (peerConnections.size === 0) {
-                        await deleteDoc(doc(db, `calls/${meetCode}`));
-                    } else {
-                        await deleteDoc(
-                            doc(db, `calls/${meetCode}/participants/${userId}`)
-                        );
-                        await deleteDoc(
-                            doc(db, `calls/${meetCode}/offers/${userId}`)
-                        );
-                        peerConnections.forEach((pc) => pc.close());
+            if (isProctor) {
+                getDoc(doc(db, meetCollection, meetCode)).then(meetDoc => {
+                    const meetData = meetDoc.data();
+                    if (meetData.proctorId === userId) {
+                        setDoc(doc(db, meetCollection, meetCode), {ended: true}, {merge: true});
                     }
-                })();
-                unsubscribeRefs.current.forEach((unsubcribe) => unsubcribe()); // Includes firestore listeners
+                    unsubscribeRefs.current.forEach((unsubcribe) => unsubcribe());
+                    localPcs.current.forEach((pc) => pc.close());
+                    enableLogs && console.log('proctoring session ended');
+                })
+            } else {
+                if (meetCode && userId) {
+                    (async () => {
+                        if (peerConnections.size === 0) {
+                            await deleteDoc(doc(db, `${meetCollection}/${meetCode}`));
+                        } else {
+                            await deleteDoc(
+                                doc(db, `${meetCollection}/${meetCode}/participants/${userId}`)
+                            );
+                            await deleteDoc(
+                                doc(db, `${meetCollection}/${meetCode}/offers/${userId}`)
+                            );
+                            peerConnections.forEach((pc) => pc.close());
+                        }
+                    })();
+                    unsubscribeRefs.current.forEach((unsubcribe) => unsubcribe()); // Includes firestore listeners
+                }
+                localPcs.current.forEach((pc) => pc.close());
+                enableLogs && console.log('cleaned up video chat');
             }
-            localPcs.current.forEach((pc) => pc.close());
-            enableLogs && console.log('cleaned up video chat');
         };
     }, [meetCode, userId]);
 
     async function initializeMeet() {
         enableLogs && console.log(new Date(), 'initializing meet');
 
-        const meetDoc = await getDoc(doc(db, 'calls', meetCode));
+        const meetDoc = await getDoc(doc(db, meetCollection, meetCode));
+        const meetData = meetDoc?.data();
 
-        if (!meetDoc.exists()) {
+        if (!meetDoc.exists() || meetData?.ended) {
             alert('Invalid meeting code');
             router.replace('/');
             return;
         }
 
+        const proctorId = meetData?.proctorId;
         const participants = await getDocs(
-            collection(db, 'calls', meetCode, 'participants')
+            collection(db, meetCollection, meetCode, 'participants')
         );
 
-        participants.forEach((participant) => {
-            const data = participant.data();
-            const peerId = data.userId;
-            if (data.userId !== userId) {
-                const pc = new RTCPeerConnection(servers);
-                enableLogs && console.log('new pc created for', peerId);
-                localPcs.current.push(pc);
-                // Store peer connection
-                setPeerConnections((prev) => new Map(prev.set(peerId, pc)));
-
-                const localStream = new MediaStream([
-                    ...(localStreamRef.current.at(0)?.getTracks() ?? []),
-                    ...(localStreamRef.current.at(1)?.getTracks() ?? []),
-                ]);
-                localStream.getTracks().forEach((track) => {
-                    pc.addTrack(track, localStream);
-                });
-                (async () => {
-                    await PCFunctionsInit(userId, peerId, pc);
-                })();
-                pc.onnegotiationneeded = async () => {
-                    await sendOffer(pc, peerId);
-                };
-
-                // Listen for answer
-                const unsubscribeAnswers = onSnapshot(
-                    doc(
-                        db,
-                        'calls',
-                        meetCode,
-                        'answers',
-                        `${peerId}-${userId}`
-                    ),
-                    async (snapshot) => {
-                        const data = snapshot.data();
-                        if (
-                            !pc.currentRemoteDescription &&
-                            data?.type &&
-                            pc?.signalingState !== 'stable' &&
-                            pc.signalingState !== 'closed'
-                        ) {
-                            await pc.setRemoteDescription(
-                                new RTCSessionDescription(
-                                    data as RTCSessionDescriptionInit
-                                )
-                            );
-                        }
-                    }
-                );
-                unsubscribeRefs.current.push(unsubscribeAnswers);
+        if (isProctor) {
+            if (proctorId !== userId) {
+                startPeerConnection(proctorId);
             }
-        });
+        } else {
+            participants.forEach((participant) => {
+                const data = participant.data();
+                const peerId = data.userId;
+                if (data.userId !== userId) {
+                    startPeerConnection(peerId);
+                }
+            });
+        }
 
         // Add participant to the meeting
         const joinedAt = performance.now() + performance.timeOrigin;
         await setDoc(
-            doc(collection(db, 'calls', meetCode, 'participants'), userId),
+            doc(collection(db, meetCollection, meetCode, 'participants'), userId),
             {
                 userId,
                 joinedAt,
             }
         );
-
-        // Listen for offers
-        const unsubscribeOffers = onSnapshot(
-            collection(db, 'calls', meetCode, 'offers', userId, 'collection'),
-            (snapshot) => {
-                snapshot.docChanges().forEach(async (change) => {
-                    if (change.type === 'added') {
-                        const data = change.doc.data();
-                        const peerId = data.fromPeerId;
-                        delete data.fromPeerId;
-                        enableLogs &&
-                            console.log('offer change', change.type, peerId);
-                        if (peerId !== userId && userId && peerId) {
-                            const pc = new RTCPeerConnection(servers);
-                            enableLogs &&
-                                console.log('new pc created for', peerId);
-                            localPcs.current.push(pc);
-                            // Store peer connection
-                            setPeerConnections(
-                                (prev) => new Map(prev.set(peerId, pc))
-                            );
-
-                            const localStream = new MediaStream([
-                                ...(localStreamRef.current.at(0)?.getTracks() ??
-                                    []),
-                                ...(localStreamRef.current.at(1)?.getTracks() ??
-                                    []),
-                            ]);
-                            localStream.getTracks().forEach((track) => {
-                                pc.addTrack(track, localStream);
-                            });
-                            await PCFunctionsInit(userId, peerId, pc);
-                            pc.onnegotiationneeded = async () => {
-                                await sendAnswer(pc, peerId, data);
-                            };
-
-                            // Listen for ICE candidates from the offering peer
-                            const unsubscribeCandidates = onSnapshot(
-                                collection(
-                                    db,
-                                    'calls',
-                                    meetCode,
-                                    'candidates',
-                                    `${peerId}-${userId}`,
-                                    'collection'
-                                ),
-                                (snapshot) => {
-                                    snapshot
-                                        .docChanges()
-                                        .forEach(async (change) => {
-                                            const data = change.doc.data();
-                                            const pc =
-                                                peerConnections.get(peerId);
-                                            enableLogs &&
-                                                console.log(
-                                                    'adding candidates',
-                                                    change.type,
-                                                    peerId
-                                                );
-                                            if (
-                                                change.type === 'added' &&
-                                                data &&
-                                                pc?.signalingState !==
-                                                    'closed' &&
-                                                !!pc?.remoteDescription
-                                            ) {
-                                                const candidate =
-                                                    new RTCIceCandidate(data);
-                                                try {
-                                                    await pc.addIceCandidate(
-                                                        candidate
-                                                    );
-                                                } catch (e) {
-                                                    enableLogs &&
-                                                        console.error(
-                                                            'Error adding ice candidate:',
-                                                            e
-                                                        );
-                                                    alert(
-                                                        'Some error occurred in connecting someone. Please try again.'
-                                                    );
-                                                }
-                                            }
-                                        });
-                                }
-                            );
-
-                            unsubscribeRefs.current.push(unsubscribeCandidates);
-                        }
-                    }
-                });
+     
+        if (isProctor) {
+            if (proctorId === userId) {
+                listenOffers();
             }
-        );
-        unsubscribeRefs.current.push(unsubscribeOffers);
+        } else {
+            listenOffers();
+        }
+
     }
 
     async function sendOffer(pc: RTCPeerConnection, peerId: string) {
@@ -365,7 +263,7 @@ export function useVideoChat({
         await addDoc(
             collection(
                 db,
-                'calls',
+                meetCollection,
                 meetCode,
                 'offers',
                 `${peerId}`,
@@ -392,7 +290,7 @@ export function useVideoChat({
 
         // Send answer
         await setDoc(
-            doc(db, 'calls', meetCode, 'answers', `${userId}-${peerId}`),
+            doc(db, meetCollection, meetCode, 'answers', `${userId}-${peerId}`),
             {
                 type: answer.type,
                 sdp: answer.sdp,
@@ -451,7 +349,7 @@ export function useVideoChat({
                 await addDoc(
                     collection(
                         db,
-                        'calls',
+                        meetCollection,
                         meetCode,
                         'candidates',
                         `${userId}-${peerId}`,
@@ -474,7 +372,7 @@ export function useVideoChat({
         const unsubscribeCandidates = onSnapshot(
             collection(
                 db,
-                'calls',
+                meetCollection,
                 meetCode,
                 'candidates',
                 `${peerId}-${userId}`,
@@ -504,6 +402,98 @@ export function useVideoChat({
         );
 
         unsubscribeRefs.current.push(unsubscribeCandidates);
+    }
+
+    function startPeerConnection(peerId: string) {
+        const pc = new RTCPeerConnection(servers);
+        enableLogs && console.log('new pc created for', peerId);
+        localPcs.current.push(pc);
+        // Store peer connection
+        setPeerConnections((prev) => new Map(prev.set(peerId, pc)));
+
+        const localStream = new MediaStream([
+            ...(localStreamRef.current.at(0)?.getTracks() ?? []),
+            ...(localStreamRef.current.at(1)?.getTracks() ?? []),
+        ]);
+        localStream.getTracks().forEach((track) => {
+            pc.addTrack(track, localStream);
+        });
+        (async () => {
+            await PCFunctionsInit(userId, peerId, pc);
+        })();
+        pc.onnegotiationneeded = async () => {
+            await sendOffer(pc, peerId);
+        };
+
+        // Listen for answer
+        const unsubscribeAnswers = onSnapshot(
+            doc(
+                db,
+                meetCollection,
+                meetCode,
+                'answers',
+                `${peerId}-${userId}`
+            ),
+            async (snapshot) => {
+                const data = snapshot.data();
+                if (
+                    !pc.currentRemoteDescription &&
+                    data?.type &&
+                    pc?.signalingState !== 'stable' &&
+                    pc.signalingState !== 'closed'
+                ) {
+                    await pc.setRemoteDescription(
+                        new RTCSessionDescription(
+                            data as RTCSessionDescriptionInit
+                        )
+                    );
+                }
+            }
+        );
+        unsubscribeRefs.current.push(unsubscribeAnswers);
+    }
+
+    function listenOffers() {
+        // Listen for offers
+        const unsubscribeOffers = onSnapshot(
+            collection(db, meetCollection, meetCode, 'offers', userId, 'collection'),
+            (snapshot) => {
+                snapshot.docChanges().forEach(async (change) => {
+                    if (change.type === 'added') {
+                        const data = change.doc.data();
+                        const peerId = data.fromPeerId;
+                        delete data.fromPeerId;
+                        enableLogs &&
+                            console.log('offer change', change.type, peerId);
+                        if (peerId !== userId && userId && peerId) {
+                            const pc = new RTCPeerConnection(servers);
+                            enableLogs &&
+                                console.log('new pc created for', peerId);
+                            localPcs.current.push(pc);
+                            // Store peer connection
+                            setPeerConnections(
+                                (prev) => new Map(prev.set(peerId, pc))
+                            );
+
+                            const localStream = new MediaStream([
+                                ...(localStreamRef.current.at(0)?.getTracks() ??
+                                    []),
+                                ...(localStreamRef.current.at(1)?.getTracks() ??
+                                    []),
+                            ]);
+                            localStream.getTracks().forEach((track) => {
+                                pc.addTrack(track, localStream);
+                            });
+                            await PCFunctionsInit(userId, peerId, pc);
+                            pc.onnegotiationneeded = async () => {
+                                await sendAnswer(pc, peerId, data);
+                            };
+                        }
+                    }
+                });
+            }
+        );
+        unsubscribeRefs.current.push(unsubscribeOffers);
     }
 
     return {
