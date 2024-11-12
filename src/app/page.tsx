@@ -2,15 +2,12 @@
 
 import Header from '@/components/Header';
 import MeetJoinBox from '@/components/MeetJoinBox';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
 
 export default function Page() {
-    const [meetCode, setMeetCode] = useState('');
     const router = useRouter();
     
-    function joinCall() {
+    function joinCall(meetCode: string) {
         if (meetCode) router.push(`/video/${meetCode}`);
     }
     return (
