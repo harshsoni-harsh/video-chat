@@ -21,6 +21,7 @@ export default function ProctorSession({
     const { user } = useAuth();
     const userId = user?.uid;
     const displayName = user?.displayName;
+    console.log(userId, displayName);
 
     const {videoStream, audioStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef, displayName, isProctor: true, isAuth: true});
 

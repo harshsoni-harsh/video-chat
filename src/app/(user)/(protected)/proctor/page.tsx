@@ -5,15 +5,15 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { useEffect } from 'react';
+import { useAuth } from '@/context/AuthUserContext';
 
 export default function Page() {
     const router = useRouter();
+    const { user } = useAuth();
     useEffect(() => {
         // Create proctor
-        const userId = `user-${Math.random()
-            .toString(36)
-            .substring(2, 9)}`;
-        localStorage.setItem('userId', userId);
+        const userId = user?.uid;
+        if (!userId) return;
 
         // Create call
         async function createCall() {
