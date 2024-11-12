@@ -19,15 +19,10 @@ export default function ProctorSession({
     const router = useRouter();
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const { user } = useAuth();
-    
-    if (!user) {
-        return <></>;
-    }
+    const userId = user?.uid;
+    const displayName = user?.displayName;
 
-    const userId = `${user.uid}`;
-    const userName = `${user.displayName}`;
-
-    const {videoStream, audioStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef, isProctor: true});
+    const {videoStream, audioStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef, displayName, isProctor: true, isAuth: true});
 
     if (meetCode && userId) {
         const toggleMic = () => setMicOn((prev) => !prev);
@@ -47,7 +42,7 @@ export default function ProctorSession({
         return (
             <div className="flex flex-col h-screen items-center w-screen">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 w-full">
-                    <LocalVideo {...{localVideoRef, localStream, userId}} />
+                    <LocalVideo {...{localVideoRef, localStream, userId, displayName}} />
                     {Array.from(remoteStreams).map(([peerId, stream]) => (
                         <RemoteVideo key={peerId} peerId={peerId} stream={stream} />
                     ))}

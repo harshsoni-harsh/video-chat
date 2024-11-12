@@ -11,7 +11,7 @@ export default function Page() {
     useEffect(() => {
         async function createCall() {
             try {
-                const callDoc = await addDoc(collection(db, 'calls'), {
+                const callDoc = await addDoc(collection(db, 'video-chat'), {
                     createdAt: serverTimestamp()
                 });
                 if (document?.hasFocus()) {

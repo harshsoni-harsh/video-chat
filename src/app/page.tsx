@@ -1,6 +1,7 @@
 'use client';
 
 import Header from '@/components/Header';
+import MeetJoinBox from '@/components/MeetJoinBox';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -15,27 +16,7 @@ export default function Page() {
     return (
         <div className="flex flex-col gap-8 lg:gap-12 h-screen justify-center items-center [&_*]:outline-none">
             <Header />
-            <div className="flex flex-col gap-8">
-                <div className="flex flex-col gap-3 border-2 rounded-xl p-2 border-gray-400">
-                    <p className="text-xl font-bold">Video Conf over WebRTC</p>
-                    <Link href={'/video'} className="text-center w-full bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded-lg">
-                        Create Call
-                    </Link>
-                    <div className="flex gap-2">
-                        <input
-                            value={meetCode}
-                            onChange={(e) => setMeetCode(e.target.value)}
-                            className="rounded-lg text-black px-2"
-                        />
-                        <button
-                            onClick={joinCall}
-                            className="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded-lg"
-                        >
-                            Join Call
-                        </button>
-                    </div>
-                </div>
-            </div>
+            <MeetJoinBox heading='Video Conf over WebRTC' button1Text='Create Call' button2Text='Join Call' link='/video' joinMeet={joinCall} />
         </div>
     );
 }

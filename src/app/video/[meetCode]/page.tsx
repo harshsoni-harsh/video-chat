@@ -18,16 +18,17 @@ export default function VideoChat({
     const { meetCode } = use(params);
     const router = useRouter();
     const localVideoRef = useRef<HTMLVideoElement>(null);
-
+    
     useEffect(() => {
         const userId = `user-${Math.random()
             .toString(36)
             .substring(2, 9)}`;
-        setUserId(userId);
-        console.warn('New user ID:', userId);
+            setUserId(userId);
+            console.warn('New user ID:', userId);
     }, []);
-    const {videoStream, audioStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef});
 
+    const {videoStream, audioStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef});
+    
     if (meetCode && userId) {
         const toggleMic = () => setMicOn((prev) => !prev);
         const toggleVideo = () => setVideoOn((prev) => !prev);

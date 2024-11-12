@@ -30,7 +30,9 @@ export function useVideoChat({
     isMicOn,
     isVideoOn,
     localVideoRef,
-    isProctor
+    isProctor,
+    displayName,
+    isAuth
 }: {
     meetCode: string,
     userId: string,
@@ -38,6 +40,8 @@ export function useVideoChat({
     isVideoOn: boolean,
     localVideoRef: React.MutableRefObject<HTMLVideoElement | null>,
     isProctor?: boolean
+    displayName?: string,
+    isAuth?: boolean
 }) {
     const [remoteStreams, setRemoteStreams] = useState<
         Map<string, MediaStream>
@@ -52,7 +56,8 @@ export function useVideoChat({
     const router = useRouter();
 
     const enableLogs = process.env.NODE_ENV === 'development';
-    const meetCollection = isProctor ? "proctor" : "calls"
+    const meetCollection = isProctor ? "proctor" : (isAuth ? "video-chat" : "calls");
+    enableLogs && console.log('meet collection:', meetCollection)
 
     useEffect(() => {
         try {
@@ -70,21 +75,23 @@ export function useVideoChat({
                     .getTracks()
                     .forEach((track) => (track.enabled = false));
                 localStreamRef.current.push(videoStream, audioStream);
-                if (localStreamRef.current && localStreamRef.current.length > 0) {
+                if (localVideoRef.current && localStreamRef.current.length > 0) {
                     localVideoRef.current.srcObject = videoStream;
                 }
             })();
         } catch (e) {
             console.error('Error accessing media devices:', e);
         }
+        const streams = localStreamRef.current;
+        const localVideo = localVideoRef.current;
         return () => {
-            if (localStreamRef.current) {
-                localStreamRef.current.forEach((stream) =>
+            if (streams) {
+                streams.forEach((stream) =>
                     stream.getTracks().forEach((track) => track.stop())
                 );
             }
-            if (localVideoRef.current) {
-                localVideoRef.current.srcObject = null;
+            if (localVideo) {
+                localVideo.srcObject = null;
             }
         };
     }, []);
@@ -169,7 +176,8 @@ export function useVideoChat({
             }
         } catch (err) {
             console.error('Error in connecting to meet');
-            router.replace('/');
+            if (isAuth) router.replace('/dashboard');
+            else router.replace('/');
         }
         return () => {
             // Cleanup
@@ -214,7 +222,8 @@ export function useVideoChat({
 
         if (!meetDoc.exists() || meetData?.ended) {
             alert('Invalid meeting code');
-            router.replace('/');
+            if (isAuth) router.replace('/dashboard');
+            else router.replace('/');
             return;
         }
 
@@ -244,6 +253,7 @@ export function useVideoChat({
             {
                 userId,
                 joinedAt,
+                name: displayName ?? userId
             }
         );
      

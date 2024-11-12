@@ -9,6 +9,10 @@ export default function MeetJoinBox({heading, button1Text, button2Text, link, jo
     function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
         if (e.key === 'Enter' && meetCode) joinMeet(meetCode);
     }
+    function handleFormSubmit(e: React.FormEvent<HTMLFormElement>) {
+        e.preventDefault();
+        joinMeet(meetCode);
+    }
     return (
         <div className="flex flex-col items-center gap-8 w-full">
             <div className="flex flex-col gap-3 border-2 rounded-xl p-2 border-gray-400 max-xs:w-11/12 max-sm:w-5/6">
@@ -21,7 +25,7 @@ export default function MeetJoinBox({heading, button1Text, button2Text, link, jo
                 >
                     {button1Text}
                 </Link>
-                <form className="grid grid-cols-3 max-sm:grid-cols-2 max-sm:pt-2 gap-2 sflex-wrap">
+                <form onClick={handleFormSubmit} className="grid grid-cols-3 max-sm:grid-cols-2 max-sm:pt-2 gap-2 sflex-wrap">
                     <input
                         value={meetCode}
                         onChange={handleInputChange}
@@ -32,7 +36,6 @@ export default function MeetJoinBox({heading, button1Text, button2Text, link, jo
                     />
                     <button
                         type="submit"
-                        onClick={() => joinMeet(meetCode)}
                         className="col-span-1 max-sm:col-span-2 bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded-lg"
                     >
                         {button2Text}
