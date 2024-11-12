@@ -17,11 +17,11 @@ export default function Page() {
                 if (document?.hasFocus()) {
                     navigator.clipboard?.writeText(callDoc.id);
                 }    
-                router.push(`/video/${callDoc.id}`);
+                router.push(`/video-chat/${callDoc.id}`);
             } catch (err) {
                 console.error('Failed to create meeting:', err);
                 alert('Failed to create meeting. Please try again.');
-                router.replace('/');
+                router.replace('/dashboard');
             }
         }
         if (router)

@@ -1,42 +1,43 @@
 'use client';
 
-import React, { use, useEffect, useRef, useState } from 'react';
+import React, { use, useRef, useState } from 'react';
 import LocalVideo from '@/components/LocalVideo';
 import Controls from '@/components/Controls';
 import RemoteVideo from '@/components/RemoteVideo';
 import { useVideoChat } from '@/hooks/useVideoChat';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthUserContext';
 
-export default function VideoChat({
+export default function ProctorSession({
     params,
 }: {
     params: Promise<any>;
 }) {
     const [isMicOn, setMicOn] = useState(false);
     const [isVideoOn, setVideoOn] = useState(false);
-    const [userId, setUserId] = useState<string>('');
     const { meetCode } = use(params);
     const router = useRouter();
     const localVideoRef = useRef<HTMLVideoElement>(null);
+    const { user } = useAuth();
+    
+    if (!user) {
+        return <></>;
+    }
 
-    useEffect(() => {
-        const userId = `user-${Math.random()
-            .toString(36)
-            .substring(2, 9)}`;
-        setUserId(userId);
-        console.warn('New user ID:', userId);
-    }, []);
-    const {videoStream, audioStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef});
+    const userId = `${user.uid}`;
+    const userName = `${user.displayName}`;
+
+    const {videoStream, audioStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef, isProctor: true});
 
     if (meetCode && userId) {
         const toggleMic = () => setMicOn((prev) => !prev);
         const toggleVideo = () => setVideoOn((prev) => !prev);
 
         function disconnectCall() {
-            videoStream?.getTracks().forEach((track) => track.stop());
-            audioStream?.getTracks().forEach((track) => track.stop());
-            peerConnections?.forEach((pc) => pc.close());
-            router.replace('/');
+            videoStream.getTracks().forEach((track) => track.stop());
+            audioStream.getTracks().forEach((track) => track.stop());
+            peerConnections.forEach((pc) => pc.close());
+            router.replace('/dashboard');
         }
         const localStream = new MediaStream([
             ...videoStream?.getTracks() ?? [],

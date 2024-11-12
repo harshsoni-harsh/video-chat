@@ -12,7 +12,7 @@ import {
     Unsubscribe,
 } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
-import db from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 
 // WebRTC configuration

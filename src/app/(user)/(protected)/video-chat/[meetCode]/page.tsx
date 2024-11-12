@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Usable, use, useEffect, useRef, useState } from 'react';
+import React, { use, useEffect, useRef, useState } from 'react';
 import LocalVideo from '@/components/LocalVideo';
 import Controls from '@/components/Controls';
 import RemoteVideo from '@/components/RemoteVideo';
@@ -14,33 +14,28 @@ export default function VideoChat({
 }) {
     const [isMicOn, setMicOn] = useState(false);
     const [isVideoOn, setVideoOn] = useState(false);
-    const [userId, setUserId] = useState<string>(null);
+    const [userId, setUserId] = useState<string>('');
     const { meetCode } = use(params);
     const router = useRouter();
     const localVideoRef = useRef<HTMLVideoElement>(null);
 
-    const localUserId = localStorage.getItem('userId');
-    if (localUserId) {
-        setUserId(localUserId);
-    }
-
-    if (!userId) {
+    useEffect(() => {
         const userId = `user-${Math.random()
             .toString(36)
             .substring(2, 9)}`;
         setUserId(userId);
-    }
-
-    const {videoStream, audioStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef, isProctor: true});
+        console.warn('New user ID:', userId);
+    }, []);
+    const {videoStream, audioStream, remoteStreams, peerConnections} = useVideoChat({meetCode, userId, isMicOn, isVideoOn, localVideoRef});
 
     if (meetCode && userId) {
         const toggleMic = () => setMicOn((prev) => !prev);
         const toggleVideo = () => setVideoOn((prev) => !prev);
 
         function disconnectCall() {
-            videoStream.getTracks().forEach((track) => track.stop());
-            audioStream.getTracks().forEach((track) => track.stop());
-            peerConnections.forEach((pc) => pc.close());
+            videoStream?.getTracks().forEach((track) => track.stop());
+            audioStream?.getTracks().forEach((track) => track.stop());
+            peerConnections?.forEach((pc) => pc.close());
             router.replace('/');
         }
         const localStream = new MediaStream([
