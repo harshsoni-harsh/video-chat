@@ -56,13 +56,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return auth.currentUser
     }
 
-    // useEffect(() => {
-    //     const appCheck = initializeAppCheck(firebase_app, {
-    //         provider: new ReCaptchaV3Provider(`${process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_KEY}`),
-    //         // Optional argument. If true, the SDK automatically refreshes App Check tokens as needed.
-    //         isTokenAutoRefreshEnabled: true
-    //     });
-    // })
+    useEffect(() => {
+        const appCheck = initializeAppCheck(firebase_app, {
+            provider: new ReCaptchaV3Provider(`${process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_KEY}`),
+            // Optional argument. If true, the SDK automatically refreshes App Check tokens as needed.
+            isTokenAutoRefreshEnabled: true
+        });
+    })
 
     useEffect(() => {
         const unsubscribe = auth.onAuthStateChanged(currentUser => {
@@ -70,7 +70,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         })
         if (!user) {
             if ((path === "/login" || path === "/register" || path === "/forgot-password")) { }
-            else router.push('/login');
+            else if (!(path.startsWith('/video/') || path === '/video' || path === '/')) router.push('/login');
         } else {
             if (user.emailVerified) {
                 if ((path === "/login" || path === "/register" || path === "/forgot-password"))

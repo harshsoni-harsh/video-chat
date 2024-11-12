@@ -6,10 +6,8 @@ export default function Layout({
     children: React.ReactNode;
 }>) {
     return (
-        <AuthProvider>
-            <div className="min-h-screen flex flex-col">
-                {children}
-            </div>
-        </AuthProvider>
+        <div className="min-h-screen flex flex-col">
+            {children}
+        </div>
     )
 }

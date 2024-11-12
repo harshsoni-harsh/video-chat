@@ -30,9 +30,9 @@ export default function ProctorSession({
         const toggleVideo = () => setVideoOn((prev) => !prev);
 
         function disconnectCall() {
-            videoStream.getTracks().forEach((track) => track.stop());
-            audioStream.getTracks().forEach((track) => track.stop());
-            peerConnections.forEach((pc) => pc.close());
+            videoStream?.getTracks().forEach((track) => track.stop());
+            audioStream?.getTracks().forEach((track) => track.stop());
+            peerConnections?.forEach((pc) => pc.close());
             router.replace('/dashboard');
         }
         const localStream = new MediaStream([
