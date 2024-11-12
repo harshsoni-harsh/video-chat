@@ -62,7 +62,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             // Optional argument. If true, the SDK automatically refreshes App Check tokens as needed.
             isTokenAutoRefreshEnabled: true
         });
-    })
+    }, []);
 
     useEffect(() => {
         const unsubscribe = auth.onAuthStateChanged(currentUser => {
