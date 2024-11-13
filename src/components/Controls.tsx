@@ -1,6 +1,11 @@
 import React from 'react';
-import { Mic, MicOff, Video, VideoOff, PhoneOff } from 'lucide-react';
-
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Settings, Users2 } from 'lucide-react';
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+  } from "@/components/ui/popover"
+  
 interface ControlsProps {
     isMicOn: boolean;
     isVideoOn: boolean;
@@ -22,6 +27,13 @@ const Controls: React.FC<ControlsProps> = ({ isMicOn, isVideoOn, toggleMic, togg
             ) : (
                 <VideoOff className="rounded-lg bg-red-500 p-2 size-10" onClick={toggleVideo} />
             )}
+            {/* <Popover>
+                <PopoverTrigger>
+                    <Users2 className="rounded-lg bg-blue-500 p-2 size-10" />
+                </PopoverTrigger>
+                <PopoverContent>Place content for the popover here.</PopoverContent>
+            </Popover> */}
+
             <button className="rounded-lg bg-blue-500 p-2" onClick={disconnectCall}>
                 <PhoneOff className="size-6" />
             </button>
