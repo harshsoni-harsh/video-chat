@@ -7,7 +7,7 @@ import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import { useEffect, useState } from "react";
 import { AuthContext } from '@/context/AuthUserContext'
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export default function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [isLoading, setLoading] = useState<boolean>(true);
     const router = useRouter();

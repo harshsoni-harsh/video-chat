@@ -181,6 +181,7 @@ export function useVideoChat({
         }
         return () => {
             // Cleanup
+            const currentLocalPcs = localPcs.current;
             if (isProctor) {
                 getDoc(doc(db, meetCollection, meetCode)).then(meetDoc => {
                     const meetData = meetDoc.data();
@@ -188,7 +189,7 @@ export function useVideoChat({
                         setDoc(doc(db, meetCollection, meetCode), {ended: true}, {merge: true});
                     }
                     unsubscribeRefs.current.forEach((unsubcribe) => unsubcribe());
-                    localPcs.current.forEach((pc) => pc.close());
+                    currentLocalPcs.forEach((pc) => pc.close());
                     enableLogs && console.log('proctoring session ended');
                 })
             } else {
@@ -208,7 +209,7 @@ export function useVideoChat({
                     })();
                     unsubscribeRefs.current.forEach((unsubcribe) => unsubcribe()); // Includes firestore listeners
                 }
-                localPcs.current.forEach((pc) => pc.close());
+                currentLocalPcs.forEach((pc) => pc.close());
                 enableLogs && console.log('cleaned up video chat');
             }
         };
